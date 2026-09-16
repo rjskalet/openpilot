@@ -24,6 +24,12 @@ VisionState = custom.LongitudinalPlanSP.SmartCruiseControl.VisionState
 ACTIVE_STATES = (VisionState.entering, VisionState.turning, VisionState.leaving)
 ENABLED_STATES = (VisionState.enabled, VisionState.overriding, *ACTIVE_STATES)
 
+# Preserve SunnyPilot's robust turn-state filter: a single model spike should not enter curve
+# control. The profile solver below is independently hysteretic and still decides whether a
+# speed reduction is actually commanded.
+_ENTERING_PRED_LAT_ACC_TH = 1.3
+_ABORT_ENTERING_PRED_LAT_ACC_TH = 1.1
+
 _A_LAT_REG_MAX = 2.
 _PLAN_MARGIN = 0.95
 _KAPPA_BIAS_D = [0., 30., 50., 70., 90., 110.]
@@ -101,7 +107,10 @@ class SmartCruiseControlVision:
       return
 
     self.current_lat_acc = self.v_ego ** 2 * abs(sm['controlsState'].curvature)
+    predicted_lat_accels = rate_z * vel
+    self.max_pred_lat_acc = float(np.percentile(predicted_lat_accels, 97))
 
+    # Derive speed-independent curvature from model geometry.
     kappa = rate_z / np.maximum(vel, _V_FLOOR)
     dist = np.empty_like(x)
     dist[0] = 0.
@@ -114,8 +123,9 @@ class SmartCruiseControlVision:
     v_raw = allowed_speed(kappa, _A_LAT_REG_MAX * _PLAN_MARGIN)
     self.v_near_min = float(np.min(v_raw[near])) if np.any(near) else float('inf')
     self.v_raw_min = float(np.min(v_raw[~far]))
-    self.max_pred_lat_acc = float(np.max(kappa[near]) * self.v_ego ** 2) if np.any(near) else 0.
 
+    # Distance-dependent correction improves brake timing but never lowers the directly
+    # resolved near-field floor on its own.
     fade = np.interp(self.v_ego, _KAPPA_BIAS_V_BP, _KAPPA_BIAS_V_FADE)
     kappa = kappa * (1. + (np.interp(dist, _KAPPA_BIAS_D, _KAPPA_BIAS_GAIN) - 1.) * fade)
     v_allowed = allowed_speed(kappa, _A_LAT_REG_MAX * _PLAN_MARGIN)
@@ -149,7 +159,7 @@ class SmartCruiseControlVision:
         if self.state == VisionState.enabled:
           if self.v_ego <= MIN_V:
             pass
-          elif self.solver_active:
+          elif self.solver_active or self.max_pred_lat_acc >= _ENTERING_PRED_LAT_ACC_TH:
             self.state = VisionState.entering
         elif self.state == VisionState.overriding:
           if not self.long_override:
@@ -157,7 +167,7 @@ class SmartCruiseControlVision:
         elif self.state == VisionState.entering:
           if self.current_lat_acc >= _TURNING_LAT_ACC_TH:
             self.state = VisionState.turning
-          elif not self.solver_active:
+          elif not self.solver_active and self.max_pred_lat_acc < _ABORT_ENTERING_PRED_LAT_ACC_TH:
             self.state = VisionState.enabled
         elif self.state == VisionState.turning:
           if self.current_lat_acc <= _LEAVING_LAT_ACC_TH:
@@ -211,6 +221,7 @@ class SmartCruiseControlVision:
       if self.limits.op_long:
         v = max(v, self.v_dip_ahead)
       else:
+        # Stock ACC is a discrete set-speed servo: pre-position at the lowest speed ahead.
         v = min(v, self.v_dip_ahead)
     return max(v, self._near_floor, MIN_V)
 
