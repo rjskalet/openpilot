@@ -48,7 +48,7 @@ class SmartCruiseControlMap:
   output_v_target: float = V_CRUISE_UNSET
   output_a_target: float = 0.
 
-  def __init__(self, CP):
+  def __init__(self, CP=None):
     self.params = Params()
     self.limits = get_planning_limits(CP)
     self.mem_params = Params("/dev/shm/params") if platform.system() != "Darwin" else self.params
