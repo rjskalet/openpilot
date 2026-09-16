@@ -43,7 +43,7 @@ _FINISH_LAT_ACC_TH = 1.1
 
 
 class SmartCruiseControlVision:
-  def __init__(self, CP):
+  def __init__(self, CP=None):
     self.params = Params()
     self.limits = get_planning_limits(CP)
     self.frame = -1
@@ -102,7 +102,6 @@ class SmartCruiseControlVision:
 
     self.current_lat_acc = self.v_ego ** 2 * abs(sm['controlsState'].curvature)
 
-    # Derive speed-independent curvature from model geometry.
     kappa = rate_z / np.maximum(vel, _V_FLOOR)
     dist = np.empty_like(x)
     dist[0] = 0.
@@ -117,8 +116,6 @@ class SmartCruiseControlVision:
     self.v_raw_min = float(np.min(v_raw[~far]))
     self.max_pred_lat_acc = float(np.max(kappa[near]) * self.v_ego ** 2) if np.any(near) else 0.
 
-    # Distance-dependent correction improves brake timing but never lowers the directly
-    # resolved near-field floor on its own.
     fade = np.interp(self.v_ego, _KAPPA_BIAS_V_BP, _KAPPA_BIAS_V_FADE)
     kappa = kappa * (1. + (np.interp(dist, _KAPPA_BIAS_D, _KAPPA_BIAS_GAIN) - 1.) * fade)
     v_allowed = allowed_speed(kappa, _A_LAT_REG_MAX * _PLAN_MARGIN)
@@ -214,7 +211,6 @@ class SmartCruiseControlVision:
       if self.limits.op_long:
         v = max(v, self.v_dip_ahead)
       else:
-        # Stock ACC is a discrete set-speed servo: pre-position at the lowest speed ahead.
         v = min(v, self.v_dip_ahead)
     return max(v, self._near_floor, MIN_V)
 
