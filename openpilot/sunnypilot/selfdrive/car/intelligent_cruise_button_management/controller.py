@@ -5,6 +5,8 @@ speed onto the Smart Cruise target with synthesized button presses.
 This keeps SunnyPilot's stock-longitudinal architecture while adopting the measured Mazda
 response behavior developed in ZoomPilot.
 """
+from dataclasses import dataclass
+
 import numpy as np
 
 from openpilot.cereal import custom
@@ -30,15 +32,24 @@ REACT_TIMER = 0.3
 RESTORE_QUIET_TIME = 1.0
 RESTORE_QUIET_FRAMES = int(RESTORE_QUIET_TIME / DT_CTRL)
 
+
+@dataclass(frozen=True)
+class DecelOvershootParams:
+  decel_bp: tuple[float, ...]
+  gap_v: tuple[float, ...]
+  max_gap: float
+  min_decel: float
+
+
 # Measured Mazda MRCC response: deeper temporary dash gaps request more deceleration from the
 # factory ACC. This never commands throttle/brake directly; it only changes the stock set speed.
-DECEL_OVERSHOOT_PARAMS = {
-  'mazda': {
-    'decel_bp': [0.02, 0.09, 0.26, 0.44, 0.73],
-    'gap_v': [2.0, 4.0, 6.0, 8.5, 10.0],
-    'max_gap': 10.,
-    'min_decel': 0.15,
-  },
+DECEL_OVERSHOOT_PARAMS: dict[str, DecelOvershootParams] = {
+  'mazda': DecelOvershootParams(
+    decel_bp=(0.02, 0.09, 0.26, 0.44, 0.73),
+    gap_v=(2.0, 4.0, 6.0, 8.5, 10.0),
+    max_gap=10.,
+    min_decel=0.15,
+  ),
 }
 DECEL_OVERSHOOT_RISE = 10.
 DECEL_OVERSHOOT_RELEASE = 3.
@@ -74,22 +85,22 @@ class IntelligentCruiseButtonManagement:
     self.is_ready_prev = False
     self.is_metric = False
     self.prompt_frozen = False
-    self.overshoot_mph = 0.0
-    self.overshoot_params = DECEL_OVERSHOOT_PARAMS.get(CP.brand)
+    self.overshoot_mph: float = 0.0
+    self.overshoot_params: DecelOvershootParams | None = DECEL_OVERSHOOT_PARAMS.get(CP.brand)
     self.limiter_active = False
 
     self.cruise_button_timers = dict(CRUISE_BUTTON_TIMER)
 
   def update_decel_overshoot(self, CS: car.CarState, LP_SP: custom.LongitudinalPlanSP) -> float:
-    if self.overshoot_params is None:
+    p = self.overshoot_params
+    if p is None:
       return 0.0
 
-    p = self.overshoot_params
     want = 0.0
     if (self.is_ready and not self.prompt_frozen and self.down_grace_timer <= 0
         and LP_SP.longitudinalPlanSource in DECEL_OVERSHOOT_SOURCES
-        and LP_SP.aTarget < -p['min_decel'] and CS.vEgo > LP_SP.vTarget):
-      want = min(float(np.interp(-LP_SP.aTarget, p['decel_bp'], p['gap_v'])), p['max_gap'])
+        and LP_SP.aTarget < -p.min_decel and CS.vEgo > LP_SP.vTarget):
+      want = min(float(np.interp(-LP_SP.aTarget, p.decel_bp, p.gap_v)), p.max_gap)
 
     if want > self.overshoot_mph:
       self.overshoot_mph = min(want, self.overshoot_mph + DECEL_OVERSHOOT_RISE * DT_CTRL)
