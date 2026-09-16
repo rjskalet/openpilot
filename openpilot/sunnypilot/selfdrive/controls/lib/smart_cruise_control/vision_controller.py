@@ -102,6 +102,8 @@ class SmartCruiseControlVision:
     vel = np.asarray(model.velocity.x, dtype=float)
     x = np.asarray(model.position.x, dtype=float)
     y = np.asarray(model.position.y, dtype=float)
+    if len(y) == 0 and len(x) > 0:
+      y = np.zeros_like(x)
     if len(rate_z) < 2 or not (len(rate_z) == len(vel) == len(x) == len(y)):
       self._reset_solver()
       return
@@ -110,7 +112,6 @@ class SmartCruiseControlVision:
     predicted_lat_accels = rate_z * vel
     self.max_pred_lat_acc = float(np.percentile(predicted_lat_accels, 97))
 
-    # Derive speed-independent curvature from model geometry.
     kappa = rate_z / np.maximum(vel, _V_FLOOR)
     dist = np.empty_like(x)
     dist[0] = 0.
@@ -124,8 +125,6 @@ class SmartCruiseControlVision:
     self.v_near_min = float(np.min(v_raw[near])) if np.any(near) else float('inf')
     self.v_raw_min = float(np.min(v_raw[~far]))
 
-    # Distance-dependent correction improves brake timing but never lowers the directly
-    # resolved near-field floor on its own.
     fade = np.interp(self.v_ego, _KAPPA_BIAS_V_BP, _KAPPA_BIAS_V_FADE)
     kappa = kappa * (1. + (np.interp(dist, _KAPPA_BIAS_D, _KAPPA_BIAS_GAIN) - 1.) * fade)
     v_allowed = allowed_speed(kappa, _A_LAT_REG_MAX * _PLAN_MARGIN)
@@ -143,7 +142,8 @@ class SmartCruiseControlVision:
     self.v_profile_now = float(v_max[0])
     self.v_dip_ahead = min_profile_speed(v_max, dist, float(dist[-1]))
 
-    commit = self.a_required >= COMMIT_FRAC * lim.a_budget
+    filtered_curve = self.max_pred_lat_acc >= _ENTERING_PRED_LAT_ACC_TH
+    commit = self.a_required >= COMMIT_FRAC * lim.a_budget and filtered_curve
     in_curve = np.isfinite(self.v_near_min) and self.v_near_min < self.v_cruise_setpoint
     hold = self.a_required >= _RELEASE_FRAC * lim.a_budget or in_curve
     self.solver_active = commit or (self.solver_active and hold)
@@ -221,7 +221,6 @@ class SmartCruiseControlVision:
       if self.limits.op_long:
         v = max(v, self.v_dip_ahead)
       else:
-        # Stock ACC is a discrete set-speed servo: pre-position at the lowest speed ahead.
         v = min(v, self.v_dip_ahead)
     return max(v, self._near_floor, MIN_V)
 
