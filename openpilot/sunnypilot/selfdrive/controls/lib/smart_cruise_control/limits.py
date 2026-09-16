@@ -9,7 +9,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from opendbc.car import structs
 from opendbc.sunnypilot.car.icbm_actuation_profile import get_actuation_profile
 from openpilot.common.realtime import DT_MDL
 
