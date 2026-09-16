@@ -53,7 +53,12 @@ class PlanningLimits:
     return delta_v_ms * _MPH_PER_MS / max(self.walk_rate, 1.)
 
 
-def get_planning_limits(CP: structs.CarParams) -> PlanningLimits:
+def get_planning_limits(CP: structs.CarParams | None = None) -> PlanningLimits:
+  # Unit tests and generic helpers historically constructed SCC controllers without CarParams.
+  # Keep that path conservative while production receives the real platform-specific limits.
+  if CP is None:
+    return PlanningLimits(a_budget=_STOCK_A_BUDGET_DEFAULT, t_lead=_STOCK_RESPONSE_T, op_long=False)
+
   if CP.openpilotLongitudinalControl:
     return PlanningLimits(a_budget=_OP_LONG_A_BUDGET, t_lead=float(CP.longitudinalActuatorDelay), op_long=True)
 
