@@ -53,7 +53,7 @@ class PlanningLimits:
     return delta_v_ms * _MPH_PER_MS / max(self.walk_rate, 1.)
 
 
-def get_planning_limits(CP: structs.CarParams | None = None) -> PlanningLimits:
+def get_planning_limits(CP=None) -> PlanningLimits:
   # Unit tests and generic helpers historically constructed SCC controllers without CarParams.
   # Keep that path conservative while production receives the real platform-specific limits.
   if CP is None:
