@@ -98,13 +98,13 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"Offroad_ChestnutPcieUnavailable", {CLEAR_ON_MANAGER_START, JSON}},
     {"Offroad_ChestnutUncompiled", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, JSON}},
     {"Offroad_ChestnutUpdateFailed", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, JSON}},
-    {"Offroad_ChestnutUsbSlow", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, JSON}},
+    {"Offroad_ChestnutUsbSlow", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, JSON}},
     {"Offroad_ConnectivityNeeded", {CLEAR_ON_MANAGER_START, JSON}},
     {"Offroad_ConnectivityNeededPrompt", {CLEAR_ON_MANAGER_START, JSON}},
     {"Offroad_ExcessiveActuation", {PERSISTENT, JSON}},
     {"Offroad_NoFirmware", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, JSON}},
     {"Offroad_Recalibration", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, JSON}},
-    {"Offroad_TemperatureTooHigh", {CLEAR_ON_MANAGER_START, JSON}},
+    {"Offroad_TemperatureTooHigh", {PERSISTENT, JSON}},
     {"Offroad_UnregisteredHardware", {CLEAR_ON_MANAGER_START, JSON}},
     {"Offroad_UpdateFailed", {CLEAR_ON_MANAGER_START, JSON}},
     {"Offroad_DriverMonitoringUncertain", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, JSON}},
@@ -114,10 +114,10 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"PrimeType", {PERSISTENT, INT}},
     {"RecordAudio", {PERSISTENT | BACKUP, BOOL}},
     {"RecordFront", {PERSISTENT | BACKUP, BOOL}},
-    {"RecordFrontLock", {PERSISTENT, BOOL}},
+    {"RecordFrontLock", {PERSISTENT, BOOL}},  // for the internal fleet
     {"SecOCKey", {PERSISTENT | DONT_LOG | BACKUP, STRING}},
-    {"ShowDebugInfo", {PERSISTENT | BACKUP, BOOL}},
-    {"RouteCount", {PERSISTENT, INT}},
+    {"ShowDebugInfo", {PERSISTENT, BOOL}},
+    {"RouteCount", {PERSISTENT, INT, "0"}},
     {"SnoozeUpdate", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
     {"SshEnabled", {PERSISTENT | BACKUP, BOOL}},
     {"TermsVersion", {PERSISTENT, STRING}},
@@ -129,11 +129,11 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"UpdaterAvailableBranches", {PERSISTENT, STRING}},
     {"UpdaterCurrentDescription", {CLEAR_ON_MANAGER_START, STRING}},
     {"UpdaterCurrentReleaseNotes", {CLEAR_ON_MANAGER_START, BYTES}},
-    {"UpdaterFetchAvailable", {PERSISTENT, BOOL}},
+    {"UpdaterFetchAvailable", {CLEAR_ON_MANAGER_START, BOOL}},
     {"UpdaterNewDescription", {CLEAR_ON_MANAGER_START, STRING}},
     {"UpdaterNewReleaseNotes", {CLEAR_ON_MANAGER_START, BYTES}},
     {"UpdaterState", {CLEAR_ON_MANAGER_START, STRING}},
-    {"UpdaterTargetBranch", {PERSISTENT | BACKUP, STRING}},
+    {"UpdaterTargetBranch", {CLEAR_ON_MANAGER_START, STRING}},
     {"UpdaterLastFetchTime", {PERSISTENT, TIME}},
     {"UptimeOffroad", {PERSISTENT, FLOAT, "0.0"}},
     {"UptimeOnroad", {PERSISTENT, FLOAT, "0.0"}},
@@ -146,8 +146,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ApiCache_DriveStats", {PERSISTENT, JSON}},
     {"AutoLaneChangeBsmDelay", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"AutoLaneChangeTimer", {PERSISTENT | BACKUP, INT, "0"}},
-    {"BlinkerLateralReengageDelay", {PERSISTENT | BACKUP, INT, "0"}},
-    {"BlinkerMinLateralControlSpeed", {PERSISTENT | BACKUP, INT, "20"}},
+    {"BlinkerLateralReengageDelay", {PERSISTENT | BACKUP, INT, "0"}},  // seconds
+    {"BlinkerMinLateralControlSpeed", {PERSISTENT | BACKUP, INT, "20"}},  // MPH or km/h
     {"BlinkerPauseLateralControl", {PERSISTENT | BACKUP, INT, "0"}},
     {"Brightness", {PERSISTENT | BACKUP, INT, "0"}},
     {"CarList", {PERSISTENT, JSON}},
@@ -203,7 +203,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
 
     // Model Manager params
     {"ModelManager_ActiveBundle", {PERSISTENT, JSON}},
-    {"ModelManager_ActiveBundleUSBGPU", {PERSISTENT, JSON}},
+    {"ModelManager_ActiveBundleUSBGPU", {PERSISTENT, JSON}}, //TODO-SP: kept for migration, remove on next sync?
     {"ModelManager_ActiveBundleChestnut", {PERSISTENT, JSON}},
     {"ModelManager_ActiveJson", {CLEAR_ON_MANAGER_START, JSON}},
     {"ModelManager_ClearCache", {CLEAR_ON_MANAGER_START, BOOL}},
@@ -214,6 +214,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ModelManager_ModelsCache", {PERSISTENT | BACKUP, JSON}},
     {"ModelManager_ModelsCache_Chestnut", {PERSISTENT | BACKUP, JSON}},
 
+    // Neural Network Lateral Control
     {"NeuralNetworkLateralControl", {PERSISTENT | BACKUP, BOOL, "0"}},
 
     // sunnylink params
@@ -259,7 +260,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"MapSpeedLimit", {CLEAR_ON_ONROAD_TRANSITION, FLOAT, "0.0"}},
     {"NextMapSpeedLimit", {CLEAR_ON_ONROAD_TRANSITION, JSON}},
     {"Offroad_OSMUpdateRequired", {CLEAR_ON_MANAGER_START, JSON}},
-    {"OsmDbUpdatesCheck", {CLEAR_ON_MANAGER_START, BOOL}},
+    {"OsmDbUpdatesCheck", {CLEAR_ON_MANAGER_START, BOOL}},  // mapd database update happens with device ON, reset on boot
     {"OSMDownloadBounds", {PERSISTENT, STRING}},
     {"OsmDownloadedDate", {PERSISTENT, STRING, "0.0"}},
     {"OSMDownloadLocations", {PERSISTENT, JSON}},
