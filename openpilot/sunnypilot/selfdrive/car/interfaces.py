@@ -8,6 +8,7 @@ from typing import Any
 
 from opendbc.car import structs
 from opendbc.car.interfaces import CarInterfaceBase
+from opendbc.car.mazda.values import MazdaFlags
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.sunnypilot.selfdrive.controls.lib.nnlc.helpers import get_nn_model_path
@@ -18,11 +19,50 @@ import openpilot.system.sentry as sentry
 from openpilot.sunnypilot.sunnylink.statsd import STATSLOGSP
 
 
+MAZDA_STEER_TO_ZERO_TORQUE_TUNE = 2.0
+
+
 def log_fingerprint(CP: structs.CarParams) -> None:
   if CP.carFingerprint == "MOCK":
     sentry.capture_fingerprint_mock()
   else:
     sentry.capture_fingerprint(CP.carFingerprint, CP.brand)
+
+
+def _seed_mazda_torque_defaults(CP: structs.CarParams, params: Params | None = None) -> None:
+  if params is None:
+    params = Params()
+
+  if CP.brand != "mazda" or not (CP.flags & MazdaFlags.STEER_TO_ZERO_EPS):
+    return
+
+  if params.get("MazdaTorqueTuneSeeded") != MAZDA_STEER_TO_ZERO_TORQUE_TUNE:
+    params.put("TorqueControlTune", MAZDA_STEER_TO_ZERO_TORQUE_TUNE, block=True)
+    params.put("MazdaTorqueTuneSeeded", MAZDA_STEER_TO_ZERO_TORQUE_TUNE, block=True)
+    cloudlog.warning("Seeded steer-to-zero Mazda TorqueControlTune=%s", MAZDA_STEER_TO_ZERO_TORQUE_TUNE)
+
+  if params.get_bool("MazdaTorqueDefaultsApplied"):
+    return
+
+  params.put_bool("EnforceTorqueControl", True)
+  params.put_bool("LiveTorqueParamsToggle", True)
+  params.put_bool("SpeedDependentTorqueToggle", True)
+  params.put_bool("MazdaTorqueDefaultsApplied", True)
+  cloudlog.warning("Seeded steer-to-zero Mazda torque-control defaults")
+
+
+def seed_car_defaults_offroad(params: Params) -> None:
+  CP_bytes = params.get("CarParamsPersistent")
+  if CP_bytes is None:
+    return
+  try:
+    from openpilot.cereal import messaging
+    from opendbc.car.structs import car
+    CP = messaging.log_from_bytes(CP_bytes, car.CarParams)
+  except Exception:
+    cloudlog.exception("seed_car_defaults_offroad: could not parse CarParamsPersistent")
+    return
+  _seed_mazda_torque_defaults(CP, params)
 
 
 def _enforce_torque_lateral_control(CP: structs.CarParams, params: Params | None = None, enabled: bool = False) -> bool:
@@ -99,6 +139,7 @@ def _cleanup_unsupported_params(CP: structs.CarParams, CP_SP: structs.CarParamsS
 
 
 def setup_interfaces(CI: CarInterfaceBase, params: Params | None = None) -> None:
+  _seed_mazda_torque_defaults(CI.CP, params)
   enforce_torque = _enforce_torque_lateral_control(CI.CP, params)
   nnlc_enabled = _initialize_neural_network_lateral_control(CI.CP, CI.CP_SP, params)
   _initialize_intelligent_cruise_button_management(CI.CP, CI.CP_SP, params)
@@ -108,31 +149,26 @@ def setup_interfaces(CI: CarInterfaceBase, params: Params | None = None) -> None
   try:
     STATSLOGSP.raw('sunnypilot.car_params', CI.CP.to_dict())
   except RuntimeError:
-    pass  # to_dict fails on macOS due to library issues.
-  # STATSLOGSP.raw('sunnypilot_params.car_params_sp', CP_SP.to_dict()) # https://github.com/sunnypilot/opendbc/pull/361
+    pass
 
 
 def initialize_params(params) -> list[dict[str, Any]]:
   keys: list = []
 
-  # hyundai
   keys.extend([
     "HyundaiLongitudinalTuning",
   ])
 
-  # subaru
   keys.extend([
     "SubaruStopAndGo",
     "SubaruStopAndGoManualParkingBrake",
   ])
 
-  # tesla
   keys.extend([
     "TeslaCoopSteering",
     "TeslaMadsScreenButton",
   ])
 
-  # toyota
   keys.extend([
     "ToyotaEnforceStockLongitudinal",
     "ToyotaStopAndGoHack",
