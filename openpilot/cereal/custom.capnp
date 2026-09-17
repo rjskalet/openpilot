@@ -31,11 +31,11 @@ struct IntelligentCruiseButtonManagement {
   vTarget @2 :Float32;
 
   enum IntelligentCruiseButtonManagementState {
-    inactive @0;
-    preActive @1;
-    increasing @2;
-    decreasing @3;
-    holding @4;
+    inactive @0;      # No button press or default state
+    preActive @1;     # Pre-active state before transitioning to increasing or decreasing
+    increasing @2;    # Increasing speed
+    decreasing @3;    # Decreasing speed
+    holding @4;       # Holding steady speed
   }
 
   enum SendButtonState {
@@ -45,6 +45,7 @@ struct IntelligentCruiseButtonManagement {
   }
 }
 
+# Same struct as Log.RadarState.LeadData
 struct LeadData {
   dRel @0 :Float32;
   yRel @1 :Float32;
@@ -73,14 +74,19 @@ struct SelfdriveStateSP @0x81c2f05a394cf4af {
 
   enum AudibleAlert {
     none @0;
+
     engage @1;
     disengage @2;
     refuse @3;
+
     warningSoft @4;
     warningImmediate @5;
+
     prompt @6;
     promptRepeat @7;
     promptDistracted @8;
+
+    # unused, these are reserved for upstream events so we don't collide
     reserved9 @9;
     reserved10 @10;
     reserved11 @11;
@@ -103,6 +109,7 @@ struct SelfdriveStateSP @0x81c2f05a394cf4af {
     reserved28 @28;
     reserved29 @29;
     reserved30 @30;
+
     promptSingleLow @31;
     promptSingleHigh @32;
   }
@@ -147,8 +154,8 @@ struct ModelManagerSP @0xaedffd8f31e7b55d {
 
   struct Model {
     type @0 :Type;
-    artifact @1 :Artifact;
-    metadata @2 :Artifact;
+    artifact @1 :Artifact;  # Main artifact
+    metadata @2 :Artifact;  # Metadata artifact
 
     enum Type {
       supercombo @0;
@@ -232,19 +239,19 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     }
 
     enum VisionState {
-      disabled @0;
-      enabled @1;
-      entering @2;
-      turning @3;
-      leaving @4;
-      overriding @5;
+      disabled @0; # System disabled or inactive.
+      enabled @1; # No predicted substantial turn on vision range.
+      entering @2; # A substantial turn is predicted ahead, adapting speed to turn comfort levels.
+      turning @3; # Actively turning. Managing acceleration to provide a roll on turn feeling.
+      leaving @4; # Road ahead straightens. Start to allow positive acceleration.
+      overriding @5; # System overriding with manual control.
     }
 
     enum MapState {
-      disabled @0;
-      enabled @1;
-      turning @2;
-      overriding @3;
+      disabled @0; # System disabled or inactive.
+      enabled @1; # No predicted substantial turn on map range.
+      turning @2; # Actively turning. Managing acceleration to provide a roll on turn feeling.
+      overriding @3; # System overriding with manual control.
     }
   }
 
@@ -280,11 +287,11 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
 
     enum AssistState {
       disabled @0;
-      inactive @1;
+      inactive @1; # No speed limit set or not enabled by parameter.
       preActive @2;
-      pending @3;
-      adapting @4;
-      active @5;
+      pending @3; # Awaiting new speed limit.
+      adapting @4; # Reducing speed to match new speed limit.
+      active @5; # Cruising at speed limit.
     }
   }
 
@@ -306,14 +313,16 @@ struct OnroadEventSP @0xda96579883444c35 {
 
   struct Event {
     name @0 :EventName;
+
+    # event types
     enable @1 :Bool;
     noEntry @2 :Bool;
-    warning @3 :Bool;
+    warning @3 :Bool;   # alerts presented only when  enabled or soft disabling
     userDisable @4 :Bool;
     softDisable @5 :Bool;
     immediateDisable @6 :Bool;
     preEnable @7 :Bool;
-    permanent @8 :Bool;
+    permanent @8 :Bool; # alerts presented regardless of openpilot state
     overrideLateral @10 :Bool;
     overrideLongitudinal @9 :Bool;
   }
@@ -349,11 +358,12 @@ struct OnroadEventSP @0xda96579883444c35 {
 }
 
 struct CarParamsSP @0x80ae746ee2596b11 {
-  flags @0 :UInt32;
-  safetyParam @1 : Int16;
+  flags @0 :UInt32;        # flags for car specific quirks in sunnypilot
+  safetyParam @1 : Int16;  # flags for sunnypilot's custom safety flags
   pcmCruiseSpeed @3 :Bool;
   intelligentCruiseButtonManagementAvailable @4 :Bool;
   enableGasInterceptor @5 :Bool;
+
   neuralNetworkLateralControl @2 :NeuralNetworkLateralControl;
 
   struct NeuralNetworkLateralControl {
@@ -378,7 +388,8 @@ struct CarControlSP @0xa5cd762cd951a455 {
     key @0 :Text;
     type @2 :ParamType;
     value @3 :Data;
-    valueDEPRECATED @1 :Text;
+
+    valueDEPRECATED @1 :Text; # The data type change may cause issues with backwards compatibility.
   }
 
   enum ParamType {
@@ -427,8 +438,8 @@ struct BackupManagerSP @0xf98d843bfd7004a3 {
     version @1 :UInt32;
     config @2 :Text;
     isEncrypted @3 :Bool;
-    createdAt @4 :Text;
-    updatedAt @5 :Text;
+    createdAt @4 :Text;  # ISO timestamp
+    updatedAt @5 :Text;  # ISO timestamp
     sunnypilotVersion @6 :Version;
     backupMetadata @7 :List(MetadataEntry);
   }
