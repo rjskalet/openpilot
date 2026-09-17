@@ -12,11 +12,15 @@ from openpilot.cereal import log
 from opendbc.car.lateral import get_friction
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.common.filter_simple import FirstOrderFilter
+from openpilot.common.pid import PIDController
 from openpilot.common.swaglog import cloudlog
 
 from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_v0 import (
   LatControlTorque as LatControlTorqueV0,
   FRICTION_THRESHOLD,
+  INTERP_SPEEDS,
+  KI,
+  KP_INTERP,
   LP_FILTER_CUTOFF_HZ,
 )
 
@@ -41,10 +45,12 @@ def get_center_chatter_jerk_deadzone(v_ego, setpoint):
 
 
 class LatControlTorque(LatControlTorqueV0):
-  KD_SCHEDULE = [KD_INTERP_SPEEDS, KD_INTERP]
-
   def __init__(self, CP, CP_SP, CI, dt):
+    # Keep v0 byte-for-byte behavior for every non-v2 controller. v2 replaces only its own
+    # PID after the base controller/extension have initialized, so the ZoomPilot KD schedule
+    # cannot leak into other torque-controlled cars.
     super().__init__(CP, CP_SP, CI, dt)
+    self.pid = PIDController([INTERP_SPEEDS, KP_INTERP], KI, [KD_INTERP_SPEEDS, KD_INTERP], rate=1/self.dt)
     self.curvature_request_buffer = deque([0.] * self.lat_accel_request_buffer_len, maxlen=self.lat_accel_request_buffer_len)
     self.jerk_filter = FirstOrderFilter(0.0, 1 / (2 * np.pi * LP_FILTER_CUTOFF_HZ), self.dt)
     self.prev_steering_pressed = False
