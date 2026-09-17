@@ -8,7 +8,7 @@ def line(y):
   return SimpleNamespace(x=[0.0, 10.0, 20.0, 30.0], y=[y, y, y, y])
 
 
-def model(path_y=0.0, left_y=1.75, right_y=-1.75, left_prob=0.95, right_prob=0.95,
+def model(path_y=0.0, left_y=-1.75, right_y=1.75, left_prob=0.95, right_prob=0.95,
           lane_change_state=log.LaneChangeState.off):
   return SimpleNamespace(
     position=line(path_y),
@@ -26,8 +26,8 @@ def test_centered_lane_has_no_bias():
 
 def test_left_of_lane_center_generates_rightward_curvature_correction():
   helper = SuburbanLaneCentering()
-  # Lane midpoint is 0.20 m to the right of the model path.
-  m = model(path_y=0.0, left_y=1.55, right_y=-1.95)
+  # Model path is at y=0 while lane midpoint is +0.20 m (right).
+  m = model(path_y=0.0, left_y=-1.55, right_y=1.95)
   corrected = 0.0
   for _ in range(100):
     corrected = helper.update(m, 20.0, 0.0)
@@ -37,17 +37,17 @@ def test_left_of_lane_center_generates_rightward_curvature_correction():
 
 def test_low_confidence_and_lane_change_fade_correction():
   helper = SuburbanLaneCentering()
-  biased = model(path_y=0.0, left_y=1.55, right_y=-1.95)
+  biased = model(path_y=0.0, left_y=-1.55, right_y=1.95)
   for _ in range(50):
     helper.update(biased, 20.0, 0.0)
   assert helper.correction_curvature > 0.0
 
-  low_confidence = model(path_y=0.0, left_y=1.55, right_y=-1.95, left_prob=0.2)
+  low_confidence = model(path_y=0.0, left_y=-1.55, right_y=1.95, left_prob=0.2)
   previous = helper.correction_curvature
   helper.update(low_confidence, 20.0, 0.0)
   assert 0.0 <= helper.correction_curvature < previous
 
-  lane_change = model(path_y=0.0, left_y=1.55, right_y=-1.95,
+  lane_change = model(path_y=0.0, left_y=-1.55, right_y=1.95,
                       lane_change_state=log.LaneChangeState.preLaneChange)
   previous = helper.correction_curvature
   helper.update(lane_change, 20.0, 0.0)
