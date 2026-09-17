@@ -18,10 +18,18 @@ def model(path_y=0.0, left_y=-1.75, right_y=1.75, left_prob=0.95, right_prob=0.9
   )
 
 
+def test_v2_straight_centering_strength_is_preserved():
+  helper = SuburbanLaneCentering()
+  assert helper.CENTERING_GAIN == 0.30
+  assert helper.MAX_CORRECTION_LAT_ACCEL == 0.15
+  assert helper.MAX_CORRECTION_CURVATURE == 0.0010
+  assert helper.MAX_CORRECTION_STEP == 2.0e-5
+
+
 def test_centered_lane_has_no_bias():
   helper = SuburbanLaneCentering()
-  corrected = helper.update(model(), 20.0, 0.001)
-  assert corrected == 0.001
+  corrected = helper.update(model(), 20.0, 0.0)
+  assert corrected == 0.0
 
 
 def test_left_of_lane_center_generates_rightward_curvature_correction():
@@ -53,6 +61,19 @@ def test_low_confidence_and_lane_change_release_correction():
   assert helper.correction_curvature == 0.0
 
 
+def test_curve_weight_keeps_straights_and_fades_gentle_bends():
+  helper = SuburbanLaneCentering()
+
+  # At 20 m/s these correspond to 0.04, 0.14, and 0.24 m/s^2.
+  full = helper._curve_weight(0.00010, 20.0)
+  partial = helper._curve_weight(0.00035, 20.0)
+  off = helper._curve_weight(0.00060, 20.0)
+
+  assert full == 1.0
+  assert 0.0 < partial < 1.0
+  assert off == 0.0
+
+
 def test_meaningful_curve_releases_centering_without_reversing_it():
   helper = SuburbanLaneCentering()
   biased = model(path_y=0.0, left_y=-1.55, right_y=1.95)
@@ -61,14 +82,13 @@ def test_meaningful_curve_releases_centering_without_reversing_it():
   initial = helper.correction_curvature
   assert initial > 0.0
 
-  # 0.001 1/m at 20 m/s is 0.4 m/s^2 requested lateral acceleration,
-  # well beyond the near-straight centering gate.
+  # 0.001 1/m at 20 m/s is 0.4 m/s^2, so the lane-centering target is zero.
   corrected = helper.update(biased, 20.0, 0.001)
   assert 0.0 <= helper.correction_curvature < initial
-  assert corrected > 0.001
+  assert corrected >= 0.001
 
   # The straight-road correction should decay to zero and never flip sign.
-  for _ in range(200):
+  for _ in range(100):
     helper.update(biased, 20.0, 0.001)
     assert helper.correction_curvature >= 0.0
   assert helper.correction_curvature == 0.0
