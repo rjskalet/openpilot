@@ -6,20 +6,25 @@ from openpilot.cereal import log
 class SuburbanLaneCentering:
   """Small, confidence-gated curvature correction for the 11th-gen Suburban.
 
-  The driving model can place its path slightly inside/left of the detected lane.
-  This helper compares the model path with the midpoint of the two lane lines at
-  10 m and 20 m, then gently biases desired curvature back toward lane center.
+  V2.1 deliberately limits this helper to near-straight road. The first V2
+  iteration also corrected through meaningful curves, which could make corner
+  entry feel too aggressive and then unwind as lane geometry changed. Curve
+  control is left to the stock model/controller until we have route-specific
+  data for a dedicated anti-cut strategy.
   """
 
   MIN_LANE_PROB = 0.75
   MIN_LANE_WIDTH_M = 2.5
   MAX_LANE_WIDTH_M = 4.8
 
-  # Conservative first-pass gains derived from the user's logged Suburban route.
-  CENTERING_GAIN = 0.30
-  MAX_CORRECTION_LAT_ACCEL = 0.15  # m/s^2
-  MAX_CORRECTION_CURVATURE = 0.0010  # 1/m, additional hard guard
-  MAX_CORRECTION_STEP = 2.0e-5  # 1/m per 100 Hz control step
+  # Conservative straight-road centering only.
+  CENTERING_GAIN = 0.15
+  MAX_CORRECTION_LAT_ACCEL = 0.08  # m/s^2
+  MAX_CORRECTION_CURVATURE = 0.0006  # 1/m, additional hard guard
+  MAX_CORRECTION_STEP = 5.0e-6  # 1/m per 100 Hz control step
+
+  # Disable new centering correction once the requested path is meaningfully curved.
+  MAX_CENTERING_ROAD_LAT_ACCEL = 0.15  # m/s^2
 
   FULL_CORRECTION_SPEED = 10.0  # m/s; fade in from 5 m/s to avoid low-speed jitter
   MIN_CORRECTION_SPEED = 5.0
@@ -72,8 +77,6 @@ class SuburbanLaneCentering:
     correction_10 = 2.0 * (center_10 - path_10) / (10.0 ** 2)
     correction_20 = 2.0 * (center_20 - path_20) / (20.0 ** 2)
 
-    # The 20 m estimate is less sensitive to lane-line noise, but 10 m responds
-    # faster to the straight-road offset visible in the Suburban route data.
     target = self.CENTERING_GAIN * (0.35 * correction_10 + 0.65 * correction_20)
 
     speed_weight = float(np.clip((v_ego - self.MIN_CORRECTION_SPEED) /
@@ -89,7 +92,13 @@ class SuburbanLaneCentering:
       self.reset()
       return float(desired_curvature)
 
-    target = self._target_correction(model_v2, v_ego)
+    # Do not chase lane-center geometry through real curves. Instead smoothly
+    # release any straight-road bias already applied so there is no sign flip or
+    # corrective "bounce" on corner entry/exit.
+    road_lat_accel = abs(desired_curvature) * max(v_ego * v_ego, 0.0)
+    target = 0.0 if road_lat_accel > self.MAX_CENTERING_ROAD_LAT_ACCEL else \
+             self._target_correction(model_v2, v_ego)
+
     step = float(np.clip(target - self.correction_curvature,
                          -self.MAX_CORRECTION_STEP, self.MAX_CORRECTION_STEP))
     self.correction_curvature += step
