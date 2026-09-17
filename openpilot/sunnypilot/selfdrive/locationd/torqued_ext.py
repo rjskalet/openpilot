@@ -29,7 +29,13 @@ LiveTorqueParametersSP = custom.CustomReserved19
 
 
 class TorqueEstimatorExt:
-  """Per-speed-bin torque learning, mixed into TorqueEstimator."""
+  """Per-speed-bin torque learning, mixed into TorqueEstimator.
+
+  Each bin runs upstream's total-least-squares fit on the quality-filtered points that fall
+  in its speed range and publishes its own latAccelFactor and friction; the controller
+  interpolates them by speed. Bins come from speed_dependent.toml, or the defaults above
+  seeded with the car's global offline values. Gated by SpeedDependentTorqueToggle.
+  """
 
   def __init__(self, CP: car.CarParams):
     self.CP = CP
@@ -100,7 +106,8 @@ class TorqueEstimatorExt:
     if not self.speed_binned:
       return
 
-    from openpilot.selfdrive.locationd.torqued import TorqueBuckets, STEER_BUCKET_BOUNDS, POINTS_PER_BUCKET, MIN_FILTER_DECAY
+    from openpilot.selfdrive.locationd.torqued import TorqueBuckets, STEER_BUCKET_BOUNDS, \
+      POINTS_PER_BUCKET, MIN_FILTER_DECAY
     from opendbc.sunnypilot.car.interfaces import get_speed_dep_config_for_car
 
     cfg = get_speed_dep_config_for_car(self.CP)
@@ -120,7 +127,7 @@ class TorqueEstimatorExt:
 
     ref_factors = cfg.get('laf_bp', [self.offline_latAccelFactor] * n_bins)
     ref_frictions = cfg.get('friction_bp', [self.offline_friction] * n_bins)
-    self.speed_bin_decays = [MIN_FILTER_DECAY] * n_bins
+    self.speed_bin_decays: list[float] = [float(MIN_FILTER_DECAY)] * n_bins
     self.speed_bin_filtered = [
       {'latAccelFactor': FirstOrderFilter(ref_factors[i], self.speed_bin_decays[i], DT_MDL),
        'frictionCoefficient': FirstOrderFilter(ref_frictions[i], self.speed_bin_decays[i], DT_MDL)}
@@ -270,7 +277,8 @@ class TorqueEstimatorExt:
     return msg
 
   def _estimate_params_speed_binned(self):
-    from openpilot.selfdrive.locationd.torqued import TorqueBuckets, STEER_BUCKET_BOUNDS, POINTS_PER_BUCKET, FRICTION_FACTOR, slope2rot, MIN_FILTER_DECAY, MAX_FILTER_DECAY
+    from openpilot.selfdrive.locationd.torqued import TorqueBuckets, STEER_BUCKET_BOUNDS, \
+      POINTS_PER_BUCKET, FRICTION_FACTOR, slope2rot, MIN_FILTER_DECAY, MAX_FILTER_DECAY
 
     results = []
     for i, bucket in enumerate(self.speed_bin_points):
@@ -307,7 +315,7 @@ class TorqueEstimatorExt:
       if bucket.is_valid():
         cloudlog.warning(f"speed-dep: bin {i} produced NaN with valid data, resetting bin")
         self.speed_bin_points[i] = self._make_speed_bin_bucket(TorqueBuckets, STEER_BUCKET_BOUNDS, POINTS_PER_BUCKET)
-        self.speed_bin_decays[i] = MIN_FILTER_DECAY
+        self.speed_bin_decays[i] = float(MIN_FILTER_DECAY)
         self._speed_bin_last_len[i] = 0
       self._speed_bin_last_valid[i] = False
       results.append((i, False))
