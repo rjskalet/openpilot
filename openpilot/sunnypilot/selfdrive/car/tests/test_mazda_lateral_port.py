@@ -1,10 +1,11 @@
-#!/usr/bin/env python3
+from typing import cast
 
 from opendbc.car.mazda.values import CAR, MazdaFlags
 from opendbc.car.structs import car
 from opendbc.sunnypilot.car.interfaces import (get_speed_dep_config_for_car, get_steer_max_schedule,
                                                get_steer_rail_schedule, get_steer_slew_schedule)
 
+from openpilot.common.params import Params
 from openpilot.sunnypilot.selfdrive.car.interfaces import (MAZDA_STEER_TO_ZERO_TORQUE_TUNE,
                                                            _seed_mazda_torque_defaults,
                                                            seed_car_defaults_offroad)
@@ -31,6 +32,10 @@ class FakeParams:
     self._store[key] = val
 
 
+def as_params(params: FakeParams) -> Params:
+  return cast(Params, params)
+
+
 def donor_eps_cp(fingerprint=CAR.MAZDA_CX9):
   return CarParams(
     brand="mazda",
@@ -51,7 +56,7 @@ def non_mazda_cp():
 class TestMazdaTorqueDefaults:
   def test_donor_eps_gets_zoom_defaults(self):
     params = FakeParams()
-    _seed_mazda_torque_defaults(donor_eps_cp(), params)
+    _seed_mazda_torque_defaults(donor_eps_cp(), as_params(params))
     for key in SEEDED_KEYS:
       assert params.get_bool(key) is True
     assert params.get("TorqueControlTune") == MAZDA_STEER_TO_ZERO_TORQUE_TUNE
@@ -59,14 +64,14 @@ class TestMazdaTorqueDefaults:
 
   def test_stock_eps_not_seeded(self):
     params = FakeParams()
-    _seed_mazda_torque_defaults(stock_eps_cp(), params)
+    _seed_mazda_torque_defaults(stock_eps_cp(), as_params(params))
     for key in SEEDED_KEYS:
       assert params.get_bool(key) is False
     assert params.get("TorqueControlTune") is None
 
   def test_other_brand_not_seeded(self):
     params = FakeParams()
-    _seed_mazda_torque_defaults(non_mazda_cp(), params)
+    _seed_mazda_torque_defaults(non_mazda_cp(), as_params(params))
     for key in SEEDED_KEYS:
       assert params.get_bool(key) is False
     assert params.get("TorqueControlTune") is None
@@ -77,14 +82,14 @@ class TestMazdaTorqueDefaults:
       "MazdaTorqueTuneSeeded": MAZDA_STEER_TO_ZERO_TORQUE_TUNE,
       "TorqueControlTune": 0.0,
     })
-    _seed_mazda_torque_defaults(donor_eps_cp(), params)
+    _seed_mazda_torque_defaults(donor_eps_cp(), as_params(params))
     assert params.get("TorqueControlTune") == 0.0
     for key in SEEDED_KEYS:
       assert params.get_bool(key) is False
 
   def test_offroad_seed_from_persistent_carparams(self):
     params = FakeParams({"CarParamsPersistent": donor_eps_cp().to_bytes(), "TorqueControlTune": 0.0})
-    seed_car_defaults_offroad(params)
+    seed_car_defaults_offroad(as_params(params))
     assert params.get("TorqueControlTune") == 2.0
     for key in SEEDED_KEYS:
       assert params.get_bool(key) is True
