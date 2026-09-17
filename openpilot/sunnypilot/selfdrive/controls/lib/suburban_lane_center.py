@@ -15,10 +15,10 @@ class SuburbanLaneCentering:
   MIN_LANE_WIDTH_M = 2.5
   MAX_LANE_WIDTH_M = 4.8
 
-  # Only apply a fraction of the geometric correction on the first iteration.
-  CENTERING_GAIN = 0.35
-  MAX_CORRECTION_LAT_ACCEL = 0.25  # m/s^2
-  MAX_CORRECTION_CURVATURE = 0.0012  # 1/m, additional hard guard
+  # Conservative first-pass gains derived from the user's logged Suburban route.
+  CENTERING_GAIN = 0.30
+  MAX_CORRECTION_LAT_ACCEL = 0.15  # m/s^2
+  MAX_CORRECTION_CURVATURE = 0.0010  # 1/m, additional hard guard
   MAX_CORRECTION_STEP = 2.0e-5  # 1/m per 100 Hz control step
 
   FULL_CORRECTION_SPEED = 10.0  # m/s; fade in from 5 m/s to avoid low-speed jitter
@@ -85,6 +85,10 @@ class SuburbanLaneCentering:
     return float(np.clip(target, -curvature_cap, curvature_cap))
 
   def update(self, model_v2, v_ego: float, desired_curvature: float) -> float:
+    if model_v2.meta.laneChangeState != log.LaneChangeState.off:
+      self.reset()
+      return float(desired_curvature)
+
     target = self._target_correction(model_v2, v_ego)
     step = float(np.clip(target - self.correction_curvature,
                          -self.MAX_CORRECTION_STEP, self.MAX_CORRECTION_STEP))
