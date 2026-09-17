@@ -41,7 +41,7 @@ class ControlsExt(ModelStateBase):
 
     self.CP_SP = messaging.log_from_bytes(params.get("CarParamsSP", block=True), custom.CarParamsSP)
 
-    self.sm_services_ext = ['radarState', 'selfdriveStateSP', 'lateralTorqueParameters', LIVE_TORQUE_PARAMETERS_SP_SERVICE]
+    self.sm_services_ext = ['radarState', 'selfdriveStateSP', LIVE_TORQUE_PARAMETERS_SP_SERVICE]
     self.pm_services_ext = ['carControlSP']
 
   def initialize_lateral_control(self, lac, CI, dt):
