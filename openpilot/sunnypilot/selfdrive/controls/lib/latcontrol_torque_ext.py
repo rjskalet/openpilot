@@ -84,15 +84,65 @@ class LatControlTorqueExt(NeuralNetworkLateralControl, LatControlTorqueExtOverri
     self._gravity_adjusted_lateral_accel = gravity_adjusted_lateral_accel
     self._steer_limited_by_safety = steer_limited_by_safety
     self._output_torque = output_torque
+
     if self._output_overrides_disabled:
       return self._pid_log, self._output_torque
+
     self.update_calculations(CS, VM, desired_lateral_accel)
     self.update_jerk_aware_torque_control(CS, roll_compensation, gravity_adjusted_lateral_accel)
     self.update_neural_network_feedforward(CS, params, calibrated_pose)
     return self._pid_log, self._output_torque
 
   def disable_speed_dep_torque(self):
-    return
+    if not self._speed_dep_active:
+      return
+    self._speed_dep_active = False
+    tune = self.CP.lateralTuning.torque
+    self.lac_torque.torque_params.latAccelFactor = tune.latAccelFactor
+    self.lac_torque.torque_params.latAccelOffset = tune.latAccelOffset
+    self.lac_torque.torque_params.friction = tune.friction
+    self.lac_torque.update_limits()
 
   def update_speed_dep_torque(self, tp, tp_sp):
-    return
+    if not tp.useParams or tp_sp is None or not tp_sp.speedBinCenters:
+      self.disable_speed_dep_torque()
+      return
+
+    speed_bp = list(tp_sp.speedBinCenters)
+    factors = list(tp_sp.speedBinLatAccelFactors)
+    frictions = list(tp_sp.speedBinFrictions)
+    valid_bp = list(tp_sp.speedBinValid)
+
+    if self._speed_dep_car_cfg is None:
+      from opendbc.sunnypilot.car.interfaces import get_speed_dep_config_for_car
+      self._speed_dep_car_cfg = get_speed_dep_config_for_car(self.CP)
+    cfg = self._speed_dep_car_cfg
+    seed_factors = cfg.get('laf_bp')
+    seed_frictions = cfg.get('friction_bp')
+    if (seed_factors and seed_frictions and len(seed_factors) == len(speed_bp) and len(seed_frictions) == len(speed_bp)):
+      fallback_factors = seed_factors
+      fallback_frictions = seed_frictions
+    else:
+      fallback_factors = [tp.latAccelFactorFiltered] * len(speed_bp)
+      fallback_frictions = [tp.frictionCoefficientFiltered] * len(speed_bp)
+
+    self._speed_dep_active = True
+    self._speed_dep_speed_bp = speed_bp
+    self._speed_dep_lat_accel_factor_bp = [factors[i] if valid_bp[i] else fallback_factors[i] for i in range(len(speed_bp))]
+    self._speed_dep_friction_bp = [frictions[i] if valid_bp[i] else fallback_frictions[i] for i in range(len(speed_bp))]
+
+    schedule = cfg.get('steer_max_schedule')
+    self._speed_dep_steer_max_schedule = schedule
+    if schedule:
+      sm_bp, sm_v = schedule
+      steer_max_at_bins = [float(np.interp(c, sm_bp, sm_v)) for c in speed_bp]
+      self._speed_dep_laf_per_count_bp = [factor / sm for factor, sm in zip(self._speed_dep_lat_accel_factor_bp, steer_max_at_bins, strict=True)]
+      self._speed_dep_friction_per_count_bp = [fric * sm for fric, sm in zip(self._speed_dep_friction_bp, steer_max_at_bins, strict=True)]
+    else:
+      self._speed_dep_laf_per_count_bp = []
+      self._speed_dep_friction_per_count_bp = []
+
+    self.lac_torque.torque_params.latAccelFactor = tp.latAccelFactorFiltered
+    self.lac_torque.torque_params.latAccelOffset = tp.latAccelOffsetFiltered
+    self.lac_torque.torque_params.friction = tp.frictionCoefficientFiltered
+    self.lac_torque.update_limits()
