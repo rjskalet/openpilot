@@ -60,14 +60,13 @@ class TorqueEstimator(ParameterEstimator, TorqueEstimatorExt):
     self.CP = CP
     self.hist_len = int(HISTORY / DT_MDL)
     self.lag = 0.0
-    self.track_all_points = track_all_points  # for offline analysis, without max lateral accel or max steer torque filters
+    self.track_all_points = track_all_points
     if decimated:
       self.min_bucket_points: list[float] = (MIN_BUCKET_POINTS / 10).tolist()
       self.min_points_total = MIN_POINTS_TOTAL_QLOG
       self.fit_points = FIT_POINTS_TOTAL_QLOG
       self.factor_sanity = FACTOR_SANITY_QLOG
       self.friction_sanity = FRICTION_SANITY_QLOG
-
     else:
       self.min_bucket_points = MIN_BUCKET_POINTS.tolist()
       self.min_points_total = MIN_POINTS_TOTAL
@@ -85,9 +84,7 @@ class TorqueEstimator(ParameterEstimator, TorqueEstimatorExt):
       self.offline_latAccelFactor = CP.lateralTuning.torque.latAccelFactor
 
     self.calibrator = PoseCalibrator()
-
     TorqueEstimatorExt.initialize_custom_params(self, decimated)
-
     self.reset()
 
     initial_params = {
@@ -102,7 +99,6 @@ class TorqueEstimator(ParameterEstimator, TorqueEstimatorExt):
     self.min_friction = (1.0 - self.friction_sanity) * self.offline_friction
     self.max_friction = (1.0 + self.friction_sanity) * self.offline_friction
 
-    # try to restore cached params
     params = Params()
     self.params = params
     params_cache = params.get("CarParamsPrevRoute")
@@ -154,8 +150,6 @@ class TorqueEstimator(ParameterEstimator, TorqueEstimatorExt):
 
   def estimate_params(self):
     points = self.filtered_points.get_points(self.fit_points)
-    # total least square solution as both x and y are noisy observations
-    # this is empirically the slope of the hysteresis parallelogram as opposed to the line through the diagonals
     try:
       _, _, v = np.linalg.svd(points, full_matrices=False)
       slope, offset = -v.T[0:2, 2] / v.T[2, 2]
@@ -181,25 +175,20 @@ class TorqueEstimator(ParameterEstimator, TorqueEstimatorExt):
       self.raw_points["steer_torque"].append(-msg.actuatorsOutput.torque)
     elif which == "carState":
       self.raw_points["carState_t"].append(t + self.lag)
-      # TODO: check if high aEgo affects resulting lateral accel
       self.raw_points["vego"].append(msg.vEgo)
       self.raw_points["steer_override"].append(msg.steeringPressed)
     elif which == "extrinsicsCalibration":
       self.calibrator.feed_extrinsics_calibration(msg)
     elif which == "lateralDelay":
       self.lag = get_lat_delay(self.params, msg.lateralDelay)
-    # calculate lateral accel from past steering torque
     elif which == "deviceMotion":
       is_valid = msg.angularVelocityDevice.valid and msg.orientationNED.valid and msg.inputsOK and msg.sensorsOK and msg.posenetOK
       if len(self.raw_points['steer_torque']) == self.hist_len and is_valid:
         t = msg.timestamp * 1e-9
         device_motion = Pose.from_device_motion(msg)
         calibrated_pose = self.calibrator.build_calibrated_pose(device_motion)
-        angular_velocity_calibrated = calibrated_pose.angular_velocity
-
-        yaw_rate = angular_velocity_calibrated.yaw
+        yaw_rate = calibrated_pose.angular_velocity.yaw
         roll = device_motion.orientation.roll
-        # check lat active up to now (without lag compensation)
         lat_active = np.interp(np.arange(t - MIN_ENGAGE_BUFFER, t + self.lag, DT_MDL),
                                self.raw_points['carControl_t'], self.raw_points['lat_active']).astype(bool)
         steer_override = np.interp(np.arange(t - MIN_ENGAGE_BUFFER, t + self.lag, DT_MDL),
@@ -207,9 +196,11 @@ class TorqueEstimator(ParameterEstimator, TorqueEstimatorExt):
         vego = np.interp(t, self.raw_points['carState_t'], self.raw_points['vego'])
         steer = np.interp(t, self.raw_points['carOutput_t'], self.raw_points['steer_torque']).item()
         lateral_acc = (vego * yaw_rate) - (np.sin(roll) * ACCELERATION_DUE_TO_GRAVITY).item()
-        if all(lat_active) and not any(steer_override) and (vego > MIN_VEL) and (abs(steer) > STEER_MIN_THRESHOLD):
+        if all(lat_active) and not any(steer_override) and (abs(steer) > STEER_MIN_THRESHOLD):
           if abs(lateral_acc) <= LAT_ACC_THRESHOLD:
-            self.filtered_points.add_point(steer, lateral_acc)
+            if vego > MIN_VEL:
+              self.filtered_points.add_point(steer, lateral_acc)
+            self._on_torque_point(steer, lateral_acc, vego)
 
           if self.track_all_points:
             self.all_torque_points.append([steer, lateral_acc])
@@ -221,7 +212,6 @@ class TorqueEstimator(ParameterEstimator, TorqueEstimatorExt):
     lateralTorqueParameters.version = VERSION
     lateralTorqueParameters.useParams = self.use_params
 
-    # Calculate raw estimates when possible, only update filters when enough points are gathered
     if self.filtered_points.is_calculable():
       latAccelFactor, latAccelOffset, frictionCoeff = self.estimate_params()
       lateralTorqueParameters.latAccelFactorRaw = float(latAccelFactor)
@@ -249,6 +239,7 @@ class TorqueEstimator(ParameterEstimator, TorqueEstimatorExt):
     lateralTorqueParameters.calPerc = self.filtered_points.get_valid_percent()
     lateralTorqueParameters.decay = self.decay
     lateralTorqueParameters.maxResets = self.resets
+    self._extend_msg(msg, with_points)
     return msg
 
 
@@ -273,11 +264,9 @@ def main(demo=False):
 
     TorqueEstimatorExt.update_use_params(estimator)
 
-    # 4Hz driven by deviceMotion
     if sm.frame % 5 == 0:
       pm.send('lateralTorqueParameters', estimator.get_msg(valid=sm.all_checks(), with_points=DEBUG))
 
-    # Cache points every 60 seconds while onroad
     if sm.frame % 240 == 0:
       msg = estimator.get_msg(valid=sm.all_checks(), with_points=True)
       params.put("LiveTorqueParameters", msg.to_bytes())
