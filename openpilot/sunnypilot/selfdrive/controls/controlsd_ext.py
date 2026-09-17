@@ -12,10 +12,8 @@ import openpilot.cereal.messaging as messaging
 from openpilot.cereal import log, custom
 
 from opendbc.car import structs
-from opendbc.car.mazda.values import MazdaFlags
 from opendbc.sunnypilot.car.interfaces import get_steer_slew_schedule
 from openpilot.common.params import Params
-from openpilot.common.swaglog import cloudlog
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
 from openpilot.sunnypilot.livedelay.helpers import get_lat_delay
 from openpilot.sunnypilot.modeld_v2.modeld_base import ModelStateBase
@@ -41,18 +39,12 @@ class ControlsExt(ModelStateBase):
     self._lat_active_last = False
     self._applied_torque_prev: float | None = None
 
-    cloudlog.info("controlsd_ext is waiting for CarParamsSP")
     self.CP_SP = messaging.log_from_bytes(params.get("CarParamsSP", block=True), custom.CarParamsSP)
-    cloudlog.info("controlsd_ext got CarParamsSP")
 
     self.sm_services_ext = ['radarState', 'selfdriveStateSP', 'lateralTorqueParameters', LIVE_TORQUE_PARAMETERS_SP_SERVICE]
     self.pm_services_ext = ['carControlSP']
 
   def initialize_lateral_control(self, lac, CI, dt):
-    if self.CP.brand == 'mazda' and self.CP.flags & MazdaFlags.STEER_TO_ZERO_EPS:
-      cloudlog.warning("Mazda steer-to-zero EPS detected: using ZoomPilot torque controller v2")
-      return LatControlTorqueV2(self.CP, self.CP_SP, CI, dt)
-
     version = resolved_tune_version(self.params, self.CP.lateralTuning.which() == 'torque')
     if version == 0.0:
       return LatControlTorqueV0(self.CP, self.CP_SP, CI, dt)
