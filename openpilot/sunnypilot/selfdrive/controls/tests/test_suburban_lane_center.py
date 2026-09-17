@@ -35,7 +35,7 @@ def test_left_of_lane_center_generates_rightward_curvature_correction():
   assert corrected <= helper.MAX_CORRECTION_LAT_ACCEL / (20.0 ** 2)
 
 
-def test_low_confidence_and_lane_change_fade_correction():
+def test_low_confidence_and_lane_change_release_correction():
   helper = SuburbanLaneCentering()
   biased = model(path_y=0.0, left_y=-1.55, right_y=1.95)
   for _ in range(50):
@@ -49,6 +49,26 @@ def test_low_confidence_and_lane_change_fade_correction():
 
   lane_change = model(path_y=0.0, left_y=-1.55, right_y=1.95,
                       lane_change_state=log.LaneChangeState.preLaneChange)
-  previous = helper.correction_curvature
   helper.update(lane_change, 20.0, 0.0)
-  assert 0.0 <= helper.correction_curvature < previous
+  assert helper.correction_curvature == 0.0
+
+
+def test_meaningful_curve_releases_centering_without_reversing_it():
+  helper = SuburbanLaneCentering()
+  biased = model(path_y=0.0, left_y=-1.55, right_y=1.95)
+  for _ in range(100):
+    helper.update(biased, 20.0, 0.0)
+  initial = helper.correction_curvature
+  assert initial > 0.0
+
+  # 0.001 1/m at 20 m/s is 0.4 m/s^2 requested lateral acceleration,
+  # well beyond the near-straight centering gate.
+  corrected = helper.update(biased, 20.0, 0.001)
+  assert 0.0 <= helper.correction_curvature < initial
+  assert corrected > 0.001
+
+  # The straight-road correction should decay to zero and never flip sign.
+  for _ in range(200):
+    helper.update(biased, 20.0, 0.001)
+    assert helper.correction_curvature >= 0.0
+  assert helper.correction_curvature == 0.0
