@@ -67,10 +67,10 @@ class SuburbanLaneCentering:
     center_10 = 0.5 * (left_10 + right_10)
     center_20 = 0.5 * (left_20 + right_20)
 
-    # Model coordinates are +Y left while openpilot desired curvature is +right.
-    # For a small arc y ~= -0.5 * curvature * x^2.
-    correction_10 = -2.0 * (center_10 - path_10) / (10.0 ** 2)
-    correction_20 = -2.0 * (center_20 - path_20) / (20.0 ** 2)
+    # Model coordinates on this stack are +Y right, and desired curvature is
+    # positive for a rightward arc. For a small arc y ~= 0.5 * curvature * x^2.
+    correction_10 = 2.0 * (center_10 - path_10) / (10.0 ** 2)
+    correction_20 = 2.0 * (center_20 - path_20) / (20.0 ** 2)
 
     # The 20 m estimate is less sensitive to lane-line noise, but 10 m responds
     # faster to the straight-road offset visible in the Suburban route data.
