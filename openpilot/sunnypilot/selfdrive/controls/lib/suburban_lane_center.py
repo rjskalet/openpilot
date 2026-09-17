@@ -27,6 +27,9 @@ class SuburbanLaneCentering:
   def __init__(self):
     self.correction_curvature = 0.0
 
+  def reset(self) -> None:
+    self.correction_curvature = 0.0
+
   @staticmethod
   def _line_y_at(line, distance_m: float) -> float:
     if len(line.x) < 2 or len(line.y) < 2:
