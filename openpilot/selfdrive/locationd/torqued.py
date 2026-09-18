@@ -92,7 +92,7 @@ class TorqueEstimator(ParameterEstimator, TorqueEstimatorExt):
 
     initial_params = {
       'latAccelFactor': self.offline_latAccelFactor,
-      'latAccelOffset': 0.0,
+      'latAccelOffset': CP.lateralTuning.torque.latAccelOffset if CP.lateralTuning.which() == 'torque' else 0.0,
       'frictionCoefficient': self.offline_friction,
       'points': []
     }
