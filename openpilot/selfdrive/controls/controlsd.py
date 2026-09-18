@@ -23,15 +23,12 @@ from openpilot.selfdrive.modeld.modeld import LAT_SMOOTH_SECONDS
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 
 from openpilot.sunnypilot.selfdrive.controls.controlsd_ext import ControlsExt
-from openpilot.sunnypilot.selfdrive.controls.lib.suburban_lane_center import SuburbanLaneCentering
 
 State = log.SelfdriveState.OpenpilotState
 LaneChangeState = log.LaneChangeState
 LaneChangeDirection = log.LaneChangeDirection
 
 ACTUATOR_FIELDS = tuple(car.CarControl.Actuators.schema.fields.keys())
-SUBURBAN_LATERAL_V2_FINGERPRINT = "CHEVROLET_SUBURBAN_CAMERA_11TH_GEN"
-
 
 class Controls(ControlsExt):
   def __init__(self) -> None:
@@ -54,7 +51,6 @@ class Controls(ControlsExt):
     self.steer_limited_by_safety = False
     self.curvature = 0.0
     self.desired_curvature = 0.0
-    self.suburban_lane_centering = SuburbanLaneCentering() if self.CP.carFingerprint == SUBURBAN_LATERAL_V2_FINGERPRINT else None
 
     self.pose_calibrator = PoseCalibrator()
     self.calibrated_pose: Pose | None = None
@@ -133,8 +129,6 @@ class Controls(ControlsExt):
 
     if not CC.latActive:
       self.LaC.reset()
-      if self.suburban_lane_centering is not None:
-        self.suburban_lane_centering.reset()
     if not CC.longActive:
       self.LoC.reset()
 
@@ -148,9 +142,6 @@ class Controls(ControlsExt):
       new_desired_curvature = self.sm['lateralManeuverPlan'].desiredCurvature if CC.latActive else self.curvature
     else:
       new_desired_curvature = model_v2.action.desiredCurvature if CC.latActive else self.curvature
-
-    if CC.latActive and self.suburban_lane_centering is not None:
-      new_desired_curvature = self.suburban_lane_centering.update(model_v2, CS.vEgo, new_desired_curvature)
 
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
     lat_delay = self.sm["lateralDelay"].lateralDelay + LAT_SMOOTH_SECONDS
