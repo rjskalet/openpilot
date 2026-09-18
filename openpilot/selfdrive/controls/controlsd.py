@@ -19,6 +19,7 @@ from openpilot.selfdrive.controls.lib.latcontrol_angle import LatControlAngle, S
 from openpilot.selfdrive.controls.lib.latcontrol_curvature import LatControlCurvature
 from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
+from openpilot.selfdrive.controls.lib.suburban_speed_tune import suburban_v32_lat_accel_factor
 from openpilot.selfdrive.modeld.modeld import LAT_SMOOTH_SECONDS
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 
@@ -29,6 +30,7 @@ LaneChangeState = log.LaneChangeState
 LaneChangeDirection = log.LaneChangeDirection
 
 ACTUATOR_FIELDS = tuple(car.CarControl.Actuators.schema.fields.keys())
+SUBURBAN_V32_FINGERPRINT = "CHEVROLET_SUBURBAN_CAMERA_11TH_GEN"
 
 class Controls(ControlsExt):
   def __init__(self) -> None:
@@ -92,7 +94,20 @@ class Controls(ControlsExt):
     # Update Torque Params
     if self.CP.lateralTuning.which() == 'torque':
       torque_params = self.sm['lateralTorqueParameters']
-      if self.sm.all_checks(['lateralTorqueParameters']) and torque_params.useParams:
+
+      if self.CP.carFingerprint == SUBURBAN_V32_FINGERPRINT:
+        # V3.2 uses Route 25's measured speed-dependent torque response.
+        # Keep factor and friction deterministic; only latAccelOffset learns
+        # live, and only after torqued has a valid estimate.
+        lat_accel_factor = suburban_v32_lat_accel_factor(CS.vEgo)
+        lat_accel_offset = float(self.CP.lateralTuning.torque.latAccelOffset)
+        if self.sm.all_checks(['lateralTorqueParameters']) and torque_params.useParams and torque_params.valid:
+          lat_accel_offset = torque_params.latAccelOffsetFiltered
+
+        self.LaC.update_torque_parameters(lat_accel_factor, lat_accel_offset,
+                                           self.CP.lateralTuning.torque.friction)
+        self.LaC.extension.update_limits()
+      elif self.sm.all_checks(['lateralTorqueParameters']) and torque_params.useParams:
         self.LaC.update_torque_parameters(torque_params.latAccelFactorFiltered, torque_params.latAccelOffsetFiltered,
                                            torque_params.frictionCoefficientFiltered)
 
