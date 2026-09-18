@@ -14,7 +14,7 @@ class TestSuburbanSpeedTune(unittest.TestCase):
     self.assertAlmostEqual(suburban_v32_lat_accel_factor(40.2336), 0.68)
 
   def test_interpolation_is_continuous_and_bounded(self):
-    values = [suburban_v32_lat_accel_factor(v / 10.0) for v in range(0, 403)]
+    values = [suburban_v32_lat_accel_factor(v / 10.0) for v in range(403)]
     self.assertGreaterEqual(min(values), 0.4437182678)
     self.assertLessEqual(max(values), 0.68)
 
