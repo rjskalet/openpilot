@@ -25,3 +25,17 @@ class TestTorqued(OpenpilotTestCase):
 
     msg = est.get_msg()
     assert msg.lateralTorqueParameters.calPerc == 100
+
+
+  def test_initial_offset_from_static_tune(self):
+    cp = car.CarParams()
+    cp.lateralTuning.init('torque')
+    cp.lateralTuning.torque.latAccelFactor = 0.68
+    cp.lateralTuning.torque.latAccelOffset = -0.26
+    cp.lateralTuning.torque.friction = 0.205
+
+    est = TorqueEstimator(cp)
+    msg = est.get_msg()
+    assert msg.lateralTorqueParameters.latAccelFactorFiltered == cp.lateralTuning.torque.latAccelFactor
+    assert msg.lateralTorqueParameters.latAccelOffsetFiltered == cp.lateralTuning.torque.latAccelOffset
+    assert msg.lateralTorqueParameters.frictionCoefficientFiltered == cp.lateralTuning.torque.friction
