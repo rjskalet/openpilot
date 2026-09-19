@@ -38,6 +38,16 @@ MIN_ENGAGE_BUFFER = 2  # secs
 VERSION = 1  # bump this to invalidate old parameter caches
 ALLOWED_CARS = ['toyota', 'hyundai', 'rivian', 'honda', 'volkswagen']
 
+SUBURBAN_FINGERPRINT = "CHEVROLET_SUBURBAN_CAMERA_11TH_GEN"
+SUBURBAN_TORQUE_CACHE_KEY = "LiveTorqueParametersSuburban"
+SUBURBAN_CAR_PARAMS_CACHE_KEY = "LiveTorqueCarParamsSuburban"
+
+
+def get_torque_cache_keys(CP):
+  if CP.carFingerprint == SUBURBAN_FINGERPRINT:
+    return SUBURBAN_TORQUE_CACHE_KEY, SUBURBAN_CAR_PARAMS_CACHE_KEY
+  return "LiveTorqueParameters", "CarParamsPrevRoute"
+
 
 def slope2rot(slope):
   sin = np.sqrt(slope ** 2 / (slope ** 2 + 1))
@@ -102,11 +112,32 @@ class TorqueEstimator(ParameterEstimator, TorqueEstimatorExt):
     self.min_friction = (1.0 - self.friction_sanity) * self.offline_friction
     self.max_friction = (1.0 + self.friction_sanity) * self.offline_friction
 
-    # try to restore cached params
+    # Restore vehicle-specific torque learning when available. For the Suburban,
+    # migrate a matching legacy/global cache once so existing learning is preserved.
     params = Params()
     self.params = params
-    params_cache = params.get("CarParamsPrevRoute")
-    torque_cache = params.get("LiveTorqueParameters")
+    torque_cache_key, car_params_cache_key = get_torque_cache_keys(CP)
+    params_cache = params.get(car_params_cache_key)
+    torque_cache = params.get(torque_cache_key)
+
+    if CP.carFingerprint == SUBURBAN_FINGERPRINT and (params_cache is None or torque_cache is None):
+      legacy_params_cache = params.get("CarParamsPrevRoute")
+      legacy_torque_cache = params.get("LiveTorqueParameters")
+      if legacy_params_cache is not None and legacy_torque_cache is not None:
+        try:
+          with log.Event.from_bytes(legacy_torque_cache) as legacy_evt:
+            legacy_ltp = legacy_evt.lateralTorqueParameters
+            with car.CarParams.from_bytes(legacy_params_cache) as legacy_CP:
+              legacy_matches = self.get_restore_key(legacy_CP, legacy_ltp.version) == self.get_restore_key(CP, VERSION)
+          if legacy_matches:
+            params.put(SUBURBAN_CAR_PARAMS_CACHE_KEY, legacy_params_cache)
+            params.put(SUBURBAN_TORQUE_CACHE_KEY, legacy_torque_cache)
+            params_cache = legacy_params_cache
+            torque_cache = legacy_torque_cache
+            cloudlog.info("migrated matching Suburban torque cache to vehicle-specific storage")
+        except Exception:
+          cloudlog.exception("failed to migrate legacy Suburban torque cache")
+
     if params_cache is not None and torque_cache is not None:
       try:
         with log.Event.from_bytes(torque_cache) as log_evt:
@@ -124,10 +155,10 @@ class TorqueEstimator(ParameterEstimator, TorqueEstimatorExt):
           initial_params['points'] = cached_points
           self.decay = cache_ltp.decay
           self.filtered_points.load_points(cached_points)
-          cloudlog.info("restored torque params from cache")
+          cloudlog.info(f"restored torque params from {torque_cache_key}")
       except Exception:
-        cloudlog.exception("failed to restore cached torque params")
-        params.remove("LiveTorqueParameters")
+        cloudlog.exception(f"failed to restore cached torque params from {torque_cache_key}")
+        params.remove(torque_cache_key)
 
     self.filtered_params = {}
     for param in initial_params:
@@ -277,10 +308,19 @@ def main(demo=False):
     if sm.frame % 5 == 0:
       pm.send('lateralTorqueParameters', estimator.get_msg(valid=sm.all_checks(), with_points=DEBUG))
 
-    # Cache points every 60 seconds while onroad
+    # Cache points every 60 seconds while onroad. Keep the legacy global cache for
+    # compatibility, and additionally preserve Suburban learning in its own persistent key.
     if sm.frame % 240 == 0:
       msg = estimator.get_msg(valid=sm.all_checks(), with_points=True)
-      params.put("LiveTorqueParameters", msg.to_bytes())
+      msg_bytes = msg.to_bytes()
+      params.put("LiveTorqueParameters", msg_bytes)
+
+      torque_cache_key, car_params_cache_key = get_torque_cache_keys(estimator.CP)
+      if torque_cache_key != "LiveTorqueParameters":
+        params.put(torque_cache_key, msg_bytes)
+        current_car_params = params.get("CarParams")
+        if current_car_params is not None:
+          params.put(car_params_cache_key, current_car_params)
 
 
 if __name__ == "__main__":
