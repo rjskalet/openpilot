@@ -467,7 +467,7 @@ def main(demo=False):
       # Suburban centering experiment: correct the model input upstream without changing
       # the shared CameraOffset param, torque calibration, or any other vehicle.
       if CP.carFingerprint == "CHEVROLET_SUBURBAN_CAMERA_11TH_GEN":
-        camera_offset = -0.05
+        camera_offset = -0.08
       else:
         camera_offset = params.get("CameraOffset", return_default=True)
       camera_offset_helper.set_offset(camera_offset)
