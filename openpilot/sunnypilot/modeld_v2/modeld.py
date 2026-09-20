@@ -464,13 +464,7 @@ def main(demo=False):
     if sm.frame % 60 == 0:
       model.lat_delay = get_lat_delay(params, sm["lateralDelay"].lateralDelay)
       model.PLANPLUS_CONTROL = params.get("PlanplusControl", return_default=True)
-      # Suburban centering experiment: correct the model input upstream without changing
-      # the shared CameraOffset param, torque calibration, or any other vehicle.
-      if CP.carFingerprint == "CHEVROLET_SUBURBAN_CAMERA_11TH_GEN":
-        camera_offset = -0.08
-      else:
-        camera_offset = params.get("CameraOffset", return_default=True)
-      camera_offset_helper.set_offset(camera_offset)
+      camera_offset_helper.set_offset(params.get("CameraOffset", return_default=True))
     lat_delay = model.lat_delay + model.LAT_SMOOTH_SECONDS
     if sm.updated["extrinsicsCalibration"] and sm.seen['narrowRoadCameraState'] and sm.seen['deviceState']:
       device_from_calib_euler = np.array(sm["extrinsicsCalibration"].rpyCalib, dtype=np.float32)
