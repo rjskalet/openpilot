@@ -83,6 +83,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"LivestreamEncoderBitrate", {CLEAR_ON_MANAGER_START | DONT_LOG, INT}},
     {"LivestreamRequestKeyframe", {CLEAR_ON_MANAGER_START | DONT_LOG, BOOL}},
     {"LiveTorqueParameters", {PERSISTENT | DONT_LOG, BYTES}},
+    {"LiveTorqueParametersSuburban", {PERSISTENT | DONT_LOG, BYTES}},
+    {"LiveTorqueCarParamsSuburban", {PERSISTENT | DONT_LOG, BYTES}},
     {"LiveTorqueParametersSP", {PERSISTENT | DONT_LOG, BYTES}},
     {"LocationFilterInitialState", {PERSISTENT, BYTES}},
     {"LateralManeuverMode", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
