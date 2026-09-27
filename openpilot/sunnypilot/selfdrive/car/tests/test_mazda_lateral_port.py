@@ -1,14 +1,24 @@
 from typing import cast
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
+from opendbc.car.car_helpers import interfaces
 from opendbc.car.mazda.values import CAR, MazdaFlags
 from opendbc.car.structs import car
 from opendbc.sunnypilot.car.interfaces import (get_speed_dep_config_for_car, get_steer_max_schedule,
                                                get_steer_rail_schedule, get_steer_slew_schedule)
 
-from openpilot.common.params import Params
+from openpilot.cereal import custom, messaging
+from openpilot.cereal.services import SERVICE_LIST
+from openpilot.common.params import ParamKeyFlag, ParamKeyType, Params
 from openpilot.sunnypilot.selfdrive.car.interfaces import (MAZDA_STEER_TO_ZERO_TORQUE_TUNE,
+                                                           _initialize_intelligent_cruise_button_management,
                                                            _seed_mazda_torque_defaults,
                                                            seed_car_defaults_offroad)
+from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.controller import IntelligentCruiseButtonManagement
+from openpilot.sunnypilot.selfdrive.controls.controlsd_ext import ControlsExt
+from openpilot.sunnypilot.selfdrive.locationd.torqued_ext import (LIVE_TORQUE_PARAMETERS_SP_KEY,
+                                                                 LIVE_TORQUE_PARAMETERS_SP_SERVICE)
 
 CarParams = car.CarParams
 SEEDED_KEYS = ("EnforceTorqueControl", "LiveTorqueParamsToggle", "SpeedDependentTorqueToggle")
@@ -51,6 +61,14 @@ def stock_eps_cp():
 
 def non_mazda_cp():
   return CarParams(brand="toyota", flags=int(MazdaFlags.STEER_TO_ZERO_EPS))
+
+
+def torque_cp(brand="mazda", flags=0):
+  cp = CarParams(brand=brand, flags=flags, carFingerprint=str(CAR.MAZDA_CX9))
+  cp.lateralTuning.init('torque')
+  cp.lateralTuning.torque.latAccelFactor = 2.67
+  cp.lateralTuning.torque.friction = 0.161
+  return cp
 
 
 class TestMazdaTorqueDefaults:
@@ -123,3 +141,118 @@ class TestMazdaSpeedDependentConfig:
     assert min(rail) > 0.0
     assert max(rail) <= 1.0
     assert 14.5 in bp
+
+
+class TestMazdaControllerSelection:
+  @staticmethod
+  def controller_ext(cp, params):
+    ext = ControlsExt.__new__(ControlsExt)
+    ext.CP = cp
+    ext.CP_SP = custom.CarParamsSP()
+    ext.params = as_params(params)
+    ext._zoompilot_mazda = cp.brand == "mazda" and bool(cp.flags & MazdaFlags.STEER_TO_ZERO_EPS)
+    return ext
+
+  def test_donor_eps_selects_torque_v2(self):
+    cp = torque_cp(flags=int(MazdaFlags.STEER_TO_ZERO_EPS))
+    ext = self.controller_ext(cp, FakeParams({"EnforceTorqueControl": True, "TorqueControlTune": 2.0}))
+    expected = object()
+    with patch("openpilot.sunnypilot.selfdrive.controls.controlsd_ext.LatControlTorqueV2", return_value=expected) as torque_v2:
+      assert ext.initialize_lateral_control(object(), object(), 0.01) is expected
+    torque_v2.assert_called_once()
+
+  def test_stock_eps_stays_on_legacy_torque_path(self):
+    cp = torque_cp()
+    ext = self.controller_ext(cp, FakeParams({"EnforceTorqueControl": False}))
+    expected = object()
+    with patch("openpilot.sunnypilot.selfdrive.controls.controlsd_ext.LatControlTorqueV0", return_value=expected) as torque_v0:
+      assert ext.initialize_lateral_control(object(), object(), 0.01) is expected
+    torque_v0.assert_called_once()
+
+  def test_non_mazda_cannot_enter_donor_eps_path(self):
+    cp = torque_cp(brand="toyota", flags=int(MazdaFlags.STEER_TO_ZERO_EPS))
+    ext = self.controller_ext(cp, FakeParams({"EnforceTorqueControl": False, "TorqueControlTune": 2.0}))
+    legacy = object()
+    with patch("openpilot.sunnypilot.selfdrive.controls.controlsd_ext.LatControlTorqueV2") as torque_v2, \
+         patch("openpilot.sunnypilot.selfdrive.controls.controlsd_ext.LatControlTorqueV0", return_value=legacy):
+      assert ext.initialize_lateral_control(object(), object(), 0.01) is legacy
+    torque_v2.assert_not_called()
+
+
+class TestCX9PersistenceAndPlumbing:
+  def test_branch_switch_parameters_keep_current_flags(self):
+    with TemporaryDirectory() as params_dir:
+      params = Params(params_dir)
+      params.put_bool("MazdaTorqueDefaultsApplied", True, block=True)
+      params.put("MazdaTorqueTuneSeeded", 2.0, block=True)
+      params.clear_all(ParamKeyFlag.BACKUP)
+      assert params.get("MazdaTorqueDefaultsApplied") is None
+      assert params.get("MazdaTorqueTuneSeeded") is None
+
+      for key in ("LiveTorqueParametersSP", "LiveTorqueParametersSuburban", "LiveTorqueCarParamsSuburban"):
+        assert params.get_type(key) == ParamKeyType.BYTES
+        params.put(key, b"cached", block=True)
+      params.clear_all(ParamKeyFlag.PERSISTENT)
+      for key in ("LiveTorqueParametersSP", "LiveTorqueParametersSuburban", "LiveTorqueCarParamsSuburban"):
+        assert params.get(key) is None
+
+  def test_shared_camera_offset_default(self):
+    assert Params().get_default_value("CameraOffset") == -0.08
+
+  def test_speed_bin_service_and_schema_are_registered(self):
+    assert LIVE_TORQUE_PARAMETERS_SP_KEY == "LiveTorqueParametersSP"
+    assert LIVE_TORQUE_PARAMETERS_SP_SERVICE == "customReserved19"
+    service = SERVICE_LIST[LIVE_TORQUE_PARAMETERS_SP_SERVICE]
+    assert service.should_log is True
+    assert service.frequency == 4.0
+    assert service.decimation == 1
+
+    msg = messaging.new_message(LIVE_TORQUE_PARAMETERS_SP_SERVICE)
+    speed_bins = getattr(msg, LIVE_TORQUE_PARAMETERS_SP_SERVICE)
+    speed_bins.version = 1
+    speed_bins.seedVersion = 2
+    speed_bins.speedBinCenters = [6.5]
+    speed_bins.speedBinLatAccelFactors = [2.67]
+    speed_bins.speedBinFrictions = [0.161]
+    speed_bins.speedBinValid = [True]
+    speed_bins.speedBinPoints = [[[0.1, 0.2]]]
+    assert speed_bins.to_dict() == {
+      "version": 1,
+      "speedBinCenters": [6.5],
+      "speedBinLatAccelFactors": [2.6700000762939453],
+      "speedBinFrictions": [0.16099999845027924],
+      "speedBinValid": [True],
+      "speedBinPoints": [[[0.10000000149011612, 0.20000000298023224]]],
+      "seedVersion": 2,
+    }
+
+
+class TestCX9FactoryLongitudinal:
+  def test_donor_eps_keeps_factory_mrcc_and_icbm_button_control(self):
+    CarInterface = interfaces[CAR.MAZDA_CX9]
+    donor_fw = car.CarParams.CarFw(ecu="eps", fwVersion=b"K0A1-3210X-A-00\x00\x00\x00\x00\x00\x00\x00\x00\x00")
+    cp = CarInterface.get_params(CAR.MAZDA_CX9, {0: {}, 1: {}, 2: {}}, [donor_fw], False, False, False)
+    cp_sp = CarInterface.get_params_sp(cp, CAR.MAZDA_CX9, {0: {}, 1: {}, 2: {}}, [donor_fw], False, False, False)
+
+    assert cp.flags & MazdaFlags.STEER_TO_ZERO_EPS
+    assert cp.openpilotLongitudinalControl is False
+    assert cp.pcmCruise is True
+    assert cp_sp.intelligentCruiseButtonManagementAvailable is True
+
+    _initialize_intelligent_cruise_button_management(cp, cp_sp, as_params(FakeParams({"IntelligentCruiseButtonManagement": True})))
+    assert cp_sp.pcmCruiseSpeed is False
+
+    icbm = IntelligentCruiseButtonManagement(cp, cp_sp)
+    cs = car.CarState(vEgo=20.0, cruiseState={"speedCluster": 20.0})
+    cc = car.CarControl(enabled=True)
+    cc.actuators.accel = 0.25
+    plan = custom.LongitudinalPlanSP(vTarget=18.0, aTarget=-0.4)
+    plan.longitudinalPlanSource = custom.LongitudinalPlanSP.LongitudinalPlanSource.sccVision
+    icbm.run(cs, cc, plan, False)
+
+    assert cc.actuators.accel == 0.25
+    assert icbm.cruise_button in (
+      custom.IntelligentCruiseButtonManagement.SendButtonState.none,
+      custom.IntelligentCruiseButtonManagement.SendButtonState.increase,
+      custom.IntelligentCruiseButtonManagement.SendButtonState.decrease,
+    )
