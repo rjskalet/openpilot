@@ -6,6 +6,7 @@ See the LICENSE.md file in the root directory for more details.
 """
 from typing import Any
 
+import openpilot.cereal.messaging as messaging
 from opendbc.car import structs
 from opendbc.car.interfaces import CarInterfaceBase
 from openpilot.common.params import Params
@@ -16,6 +17,36 @@ from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.helpers import set_
 import openpilot.system.sentry as sentry
 
 from openpilot.sunnypilot.sunnylink.statsd import STATSLOGSP
+
+SUBURBAN_LIVE_TABLE_FINGERPRINT = "CHEVROLET_SUBURBAN_CAMERA_11TH_GEN"
+
+
+def _seed_suburban_live_table_defaults(CP: structs.CarParams, params: Params | None = None) -> None:
+  if CP.carFingerprint != SUBURBAN_LIVE_TABLE_FINGERPRINT:
+    return
+  if params is None:
+    params = Params()
+  if params.get_bool("SuburbanLiveTableDefaultsApplied"):
+    return
+
+  params.put_bool("EnforceTorqueControl", True, block=True)
+  params.put_bool("LiveTorqueParamsToggle", True, block=True)
+  params.put_bool("LiveTorqueParamsRelaxedToggle", True, block=True)
+  params.put_bool("SpeedDependentTorqueToggle", True, block=True)
+  params.put_bool("SuburbanLiveTableDefaultsApplied", True, block=True)
+  cloudlog.warning("Seeded Suburban live torque-table defaults")
+
+
+def seed_car_defaults_offroad(params: Params) -> None:
+  CP_bytes = params.get("CarParamsPersistent")
+  if CP_bytes is None:
+    return
+  try:
+    CP = messaging.log_from_bytes(CP_bytes, structs.CarParams)
+  except Exception:
+    cloudlog.exception("seed_car_defaults_offroad: could not parse CarParamsPersistent")
+    return
+  _seed_suburban_live_table_defaults(CP, params)
 
 
 def log_fingerprint(CP: structs.CarParams) -> None:
@@ -99,6 +130,7 @@ def _cleanup_unsupported_params(CP: structs.CarParams, CP_SP: structs.CarParamsS
 
 
 def setup_interfaces(CI: CarInterfaceBase, params: Params | None = None) -> None:
+  _seed_suburban_live_table_defaults(CI.CP, params)
   enforce_torque = _enforce_torque_lateral_control(CI.CP, params)
   nnlc_enabled = _initialize_neural_network_lateral_control(CI.CP, CI.CP_SP, params)
   _initialize_intelligent_cruise_button_management(CI.CP, CI.CP_SP, params)

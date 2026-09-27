@@ -10,6 +10,7 @@ import openpilot.cereal.messaging as messaging
 from openpilot.cereal import log, custom
 
 from opendbc.car import structs
+from opendbc.sunnypilot.car.interfaces import get_speed_dep_config_for_car
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
@@ -17,6 +18,7 @@ from openpilot.sunnypilot.livedelay.helpers import get_lat_delay
 from openpilot.sunnypilot.modeld_v2.modeld_base import ModelStateBase
 from openpilot.sunnypilot.selfdrive.controls.lib.blinker_pause_lateral import BlinkerPauseLateral
 from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_v0 import LatControlTorque as LatControlTorqueV0
+from openpilot.sunnypilot.selfdrive.locationd.torqued_ext import LIVE_TORQUE_PARAMETERS_SP_SERVICE
 
 
 class ControlsExt(ModelStateBase):
@@ -26,12 +28,15 @@ class ControlsExt(ModelStateBase):
     self.params = params
     self._param_update_time: float = 0.0
     self.blinker_pause_lateral = BlinkerPauseLateral()
+    self._speed_dependent_torque = bool(get_speed_dep_config_for_car(CP))
 
     cloudlog.info("controlsd_ext is waiting for CarParamsSP")
     self.CP_SP = messaging.log_from_bytes(params.get("CarParamsSP", block=True), custom.CarParamsSP)
     cloudlog.info("controlsd_ext got CarParamsSP")
 
     self.sm_services_ext = ['radarState', 'selfdriveStateSP']
+    if self._speed_dependent_torque:
+      self.sm_services_ext.append(LIVE_TORQUE_PARAMETERS_SP_SERVICE)
     self.pm_services_ext = ['carControlSP']
 
   def initialize_lateral_control(self, lac, CI, dt):
@@ -117,3 +122,12 @@ class ControlsExt(ModelStateBase):
   def run_ext(self, sm: messaging.SubMaster, pm: messaging.PubMaster) -> None:
     CC_SP = self.state_control_ext(sm)
     self.publish_ext(CC_SP, sm, pm)
+
+    if (self._speed_dependent_torque
+        and self.CP.lateralTuning.which() == 'torque'
+        and sm.updated.get('lateralTorqueParameters', False)
+        and sm.all_checks(['lateralTorqueParameters'])):
+      extension = getattr(self.LaC, 'extension', None)
+      if extension is not None:
+        tp_sp = sm[LIVE_TORQUE_PARAMETERS_SP_SERVICE] if sm.all_checks([LIVE_TORQUE_PARAMETERS_SP_SERVICE]) else None
+        extension.update_speed_dep_torque(sm['lateralTorqueParameters'], tp_sp)
