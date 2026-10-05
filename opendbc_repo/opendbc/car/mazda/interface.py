@@ -29,11 +29,6 @@ class CarInterface(CarInterfaceBase):
     # verified steer-to-zero donor EPS is detected. Do not broadly enable legacy EPS firmware.
     ret.dashcamOnly = candidate not in (CAR.MAZDA_CX5_2022, CAR.MAZDA_CX9_2021) and not steer_to_zero
 
-    # First-install validation branch: force every Mazda candidate non-actuating while still
-    # allowing donor-EPS firmware detection, CarParams population, and CAN logging. This avoids
-    # relying on the exact candidate StarPilot fingerprints before we have validated the car.
-    ret.dashcamOnly = True
-
     ret.steerActuatorDelay = 0.14 if steer_to_zero else 0.1
     ret.steerLimitTimer = 0.8
 

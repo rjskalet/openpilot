@@ -34,6 +34,11 @@ class CarController(CarControllerBase):
 
     self.driver_torque_samples.append(CS.out.steeringTorque)
 
+    if CS.lkas_rejected:
+      # Panda resets its steering rate-limit reference after rejecting a command. Match
+      # that state before the normal Mazda driver/rate limiter calculates the next one.
+      self.apply_torque_last = 0
+
     if CC.latActive:
       new_torque = int(round(CC.actuators.torque * steer_max))
 
