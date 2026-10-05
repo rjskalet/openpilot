@@ -24,22 +24,28 @@ class CarController(CarControllerBase):
 
   def update(self, CC, CS, now_nanos, starpilot_toggles):
     can_sends = []
-
     apply_torque = 0
-
-    if self.steer_to_zero:
-      steer_max = round(float(np.interp(CS.out.vEgoRaw, self.params.STEER_MAX_LOOKUP[0], self.params.STEER_MAX_LOOKUP[1])))
-    else:
-      steer_max = self.params.STEER_MAX
+    steer_max = self.params.STEER_MAX
 
     self.driver_torque_samples.append(CS.out.steeringTorque)
 
+    if CS.lkas_rejected:
+      # Panda reports refused transmitted 0x243 frames on loopback bus 192. A rejection resets
+      # Panda's steering rate-limit reference, so match that state before the normal limiter runs.
+      # This is the current ZoomPilot recovery path and prevents a stale controller ramp from
+      # repeatedly producing commands Panda will refuse.
+      self.apply_torque_last = 0
+
     if CC.latActive:
+      # ZoomPilot donor architecture: normalized torque always maps onto one fixed 1200-count
+      # scale. Vehicle speed changes only the physical EPS clamp below, never the tune scale.
       new_torque = int(round(CC.actuators.torque * steer_max))
 
       if self.steer_to_zero:
-        # Clamp requests to the measured EPS applied-torque rail so controls sees real saturation.
-        eps_ceiling = round(float(np.interp(CS.out.vEgoRaw, self.params.EPS_CEILING_LOOKUP[0], self.params.EPS_CEILING_LOOKUP[1])))
+        # Clamp to the measured applied EPS authority so controlsd sees real saturation while
+        # preserving a stable torque-controller normalization across speed.
+        eps_ceiling = round(float(np.interp(CS.out.vEgoRaw, self.params.EPS_CEILING_LOOKUP[0],
+                                            self.params.EPS_CEILING_LOOKUP[1])))
         new_torque = int(np.clip(new_torque, -eps_ceiling, eps_ceiling))
 
       if new_torque >= 0:
@@ -50,7 +56,8 @@ class CarController(CarControllerBase):
       apply_torque = apply_driver_steer_torque_limits(new_torque, self.apply_torque_last,
                                                       driver_torque, self.params, steer_max)
 
-    # ZoomPilot-style protection for a steer-to-zero EPS reporting sustained zero delivery.
+    # ZoomPilot protection for a steer-to-zero EPS reporting sustained zero delivery, including
+    # its known first-engagement standby behavior at a crawl. Recovery always starts from zero.
     if self.steer_to_zero and (CS.steer_undelivered or CS.steer_first_engage_hold):
       apply_torque = 0
 
