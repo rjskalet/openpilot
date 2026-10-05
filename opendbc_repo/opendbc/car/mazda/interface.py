@@ -4,7 +4,7 @@ from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.car.mazda.carcontroller import CarController
 from opendbc.car.mazda.carstate import CarState
-from opendbc.car.mazda.values import CAR, LKAS_LIMITS, STEER_TO_ZERO_EPS_FW, MazdaFlags, MazdaSafetyFlags
+from opendbc.car.mazda.values import CAR, LKAS_LIMITS, STEER_TO_ZERO_EPS_FW, CarControllerParams, MazdaFlags, MazdaSafetyFlags
 
 
 class CarInterface(CarInterfaceBase):
@@ -25,19 +25,21 @@ class CarInterface(CarInterfaceBase):
       ret.flags |= MazdaFlags.STEER_TO_ZERO_EPS.value
       ret.safetyConfigs[0].safetyParam |= MazdaSafetyFlags.STEER_TO_ZERO_EPS.value
 
-    # Preserve StarPilot's supported Mazda bodies, and additionally lift dashcam-only when a
-    # verified steer-to-zero donor EPS is detected. Do not broadly enable legacy EPS firmware.
+    # Preserve StarPilot's supported Mazda bodies, and additionally lift dashcam-only only when
+    # the known steer-to-zero donor EPS is positively identified. Unknown/stock legacy CX-9 EPS
+    # remains non-actuating.
     ret.dashcamOnly = candidate not in (CAR.MAZDA_CX5_2022, CAR.MAZDA_CX9_2021) and not steer_to_zero
-
-    # First-install validation branch: force every Mazda candidate non-actuating while still
-    # allowing donor-EPS firmware detection, CarParams population, and CAN logging. This avoids
-    # relying on the exact candidate StarPilot fingerprints before we have validated the car.
-    ret.dashcamOnly = True
 
     ret.steerActuatorDelay = 0.14 if steer_to_zero else 0.1
     ret.steerLimitTimer = 0.8
 
     CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+    if steer_to_zero:
+      # StarPilot's Mazda torque data is calibrated on the upstream 800-count scale. ZoomPilot's
+      # donor architecture holds the controller scale at 1200 counts and converts the tune once,
+      # instead of changing the normalization with vehicle speed.
+      ret.lateralTuning.torque.latAccelFactor *= CarControllerParams.TUNE_SCALE
+      ret.lateralTuning.torque.friction /= CarControllerParams.TUNE_SCALE
 
     if not steer_to_zero and candidate not in (CAR.MAZDA_CX5_2022,):
       ret.minSteerSpeed = LKAS_LIMITS.DISABLE_SPEED * CV.KPH_TO_MS
