@@ -25,6 +25,7 @@ class CarState(CarStateBase):
     self.lkas_track_state = False
     self.steer_undelivered_frames = 0
     self.steer_undelivered = False
+    self.steer_undelivered_alert = False
     self.lkas_block_origin_speed: float | None = None
     self.lkas_delivered = False
     self.steer_first_engage_hold = False
@@ -51,6 +52,7 @@ class CarState(CarStateBase):
     if not self.lkas_blocked or self.lkas_setting_invalid:
       self.steer_undelivered_frames = 0
       self.steer_undelivered = False
+      self.steer_undelivered_alert = False
       self.lkas_block_origin_speed = None
     elif self.lkas_block_origin_speed is None:
       self.lkas_block_origin_speed = v_ego_raw
@@ -61,6 +63,18 @@ class CarState(CarStateBase):
         self.steer_undelivered = self.steer_undelivered_frames >= self.params.STEER_UNDELIVERED_FRAMES
       else:
         self.steer_undelivered_frames = 0
+
+    if self.steer_undelivered:
+      # The first 200 ms latch stops commands before the camera faults. Escalate to a standard
+      # temporary steering fault only when the same zero-delivery block persists at road speed,
+      # did not originate from the near-zero standby region, and is no longer TRACK_STATE standby.
+      self.steer_undelivered_frames += 1
+      if (not self.steer_undelivered_alert and not self.lkas_track_state and
+          self.steer_undelivered_frames >= self.params.STEER_UNDELIVERED_FRAMES + self.params.STEER_UNDELIVERED_ALERT_FRAMES and
+          v_ego_raw >= self.params.STEER_UNDELIVERED_ALERT_MIN_SPEED and
+          self.lkas_block_origin_speed is not None and
+          self.lkas_block_origin_speed >= self.params.STEER_UNDELIVERED_ALERT_ORIGIN_SPEED):
+        self.steer_undelivered_alert = True
 
   def update(self, can_parsers, starpilot_toggles) -> structs.CarState:
     cp = can_parsers[Bus.pt]
@@ -152,9 +166,9 @@ class CarState(CarStateBase):
     ret.lowSpeedAlert = self.low_speed_alert
 
     if self.CP.flags & MazdaFlags.STEER_TO_ZERO_EPS:
-      # LKAS_BLOCK is not itself a fault on this EPS; controller-side zero-delivery protection
-      # handles sustained non-delivery without turning normal low-speed behavior into a disable.
-      ret.steerFaultTemporary = False
+      # A normal LKAS_BLOCK is not itself a fault on this EPS. Only ZoomPilot's sustained rolling
+      # zero-delivery alert becomes a temporary fault after commands have already been suppressed.
+      ret.steerFaultTemporary = self.steer_undelivered_alert
     else:
       ret.steerFaultTemporary = self.lkas_allowed_speed and lkas_blocked
 
