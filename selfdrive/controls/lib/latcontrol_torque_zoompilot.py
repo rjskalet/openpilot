@@ -57,6 +57,8 @@ class LatControlTorqueZoomPilot(LatControl):
 
   def __init__(self, CP, CI, dt):
     super().__init__(CP, CI, dt)
+    self.CP = CP
+    self.controller_params = CarControllerParams(CP)
     self.torque_params = CP.lateralTuning.torque.as_builder()
     self.torque_from_lateral_accel = CI.torque_from_lateral_accel()
     self.lateral_accel_from_torque = CI.lateral_accel_from_torque()
@@ -87,9 +89,9 @@ class LatControlTorqueZoomPilot(LatControl):
     self.update_rail(0.0)
 
   def rail_scale_at(self, v_ego: float) -> float:
-    ceiling = float(np.interp(v_ego, CarControllerParams(self.CP).EPS_CEILING_LOOKUP[0],
-                              CarControllerParams(self.CP).EPS_CEILING_LOOKUP[1]))
-    return ceiling / CarControllerParams.EPS_STEER_MAX
+    ceiling = float(np.interp(v_ego, self.controller_params.EPS_CEILING_LOOKUP[0],
+                              self.controller_params.EPS_CEILING_LOOKUP[1]))
+    return ceiling / self.controller_params.STEER_MAX
 
   def update_rail(self, v_ego: float) -> None:
     rail = self.rail_scale_at(v_ego)
