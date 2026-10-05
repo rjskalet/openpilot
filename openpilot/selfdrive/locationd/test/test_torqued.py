@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from opendbc.car.structs import car
+from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.test import OpenpilotTestCase
 from openpilot.selfdrive.locationd.torqued import TorqueEstimator, VERSION
 from openpilot.sunnypilot.selfdrive.locationd.torqued_ext import (LIVE_TORQUE_PARAMETERS_SP_KEY,
@@ -72,10 +73,10 @@ class TestSpeedDependentTorqued:
     ext.speed_bin_lat_accel_factor_bounds = [(2.0, 3.0), (2.0, 3.0)]
     ext.speed_bin_friction_bounds = [(0.1, 0.2), (0.1, 0.2)]
     ext.speed_bin_filtered = [
-      {"latAccelFactor": SimpleNamespace(x=2.1, update_alpha=MagicMock()),
-       "frictionCoefficient": SimpleNamespace(x=0.11, update_alpha=MagicMock())},
-      {"latAccelFactor": SimpleNamespace(x=2.2, update_alpha=MagicMock()),
-       "frictionCoefficient": SimpleNamespace(x=0.12, update_alpha=MagicMock())},
+      {"latAccelFactor": FirstOrderFilter(2.1, 1.0, 0.05),
+       "frictionCoefficient": FirstOrderFilter(0.11, 1.0, 0.05)},
+      {"latAccelFactor": FirstOrderFilter(2.2, 1.0, 0.05),
+       "frictionCoefficient": FirstOrderFilter(0.12, 1.0, 0.05)},
     ]
     ext.speed_bin_points = [MagicMock(), MagicMock()]
 
@@ -107,8 +108,8 @@ class TestSpeedDependentTorqued:
     ext.speed_bin_lat_accel_factor_bounds = [(2.0, 3.0)]
     ext.speed_bin_friction_bounds = [(0.1, 0.2)]
     ext.speed_bin_filtered = [{
-      "latAccelFactor": SimpleNamespace(x=2.67, update_alpha=MagicMock()),
-      "frictionCoefficient": SimpleNamespace(x=0.161, update_alpha=MagicMock()),
+      "latAccelFactor": FirstOrderFilter(2.67, 1.0, 0.05),
+      "frictionCoefficient": FirstOrderFilter(0.161, 1.0, 0.05),
     }]
     ext.speed_bin_points = [MagicMock()]
     cache_ltp = SimpleNamespace(version=VERSION, valid=False, decay=5.0)
