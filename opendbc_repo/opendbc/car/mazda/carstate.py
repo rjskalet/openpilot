@@ -29,6 +29,15 @@ class CarState(CarStateBase):
     self.lkas_delivered = False
     self.steer_first_engage_hold = False
 
+    # Panda returns refused bus-0 transmit frames on source 192. Only nonzero steering refusals
+    # matter to the controller's rate-limit synchronization.
+    self.lkas_rejected = 0
+
+    # The Mazda lane-keep setting is independent of openpilot. If the optional CAM_SETTINGS frame
+    # is present, remember its setting; cars that never send it retain the permissive default.
+    self.lkas_setting_on = True
+    self.lkas_setting_invalid = False
+
     self.distance_button = 0
 
   def update_steer_undelivered(self, v_ego_raw: float, lkas_request: float) -> None:
@@ -36,14 +45,17 @@ class CarState(CarStateBase):
     self.steer_first_engage_hold = (not self.lkas_delivered and self.lkas_blocked and self.lkas_track_state and
                                     v_ego_raw < self.params.STEER_UNDELIVERED_ALERT_ORIGIN_SPEED)
 
-    if not self.lkas_blocked:
+    # When the driver's own LKAS setting is off, zero delivery is expected and must not become a
+    # donor-EPS delivery fault. lkas_setting_invalid is intentionally last frame's state here,
+    # matching ZoomPilot's ordering.
+    if not self.lkas_blocked or self.lkas_setting_invalid:
       self.steer_undelivered_frames = 0
       self.steer_undelivered = False
       self.lkas_block_origin_speed = None
     elif self.lkas_block_origin_speed is None:
       self.lkas_block_origin_speed = v_ego_raw
 
-    if self.lkas_blocked and not self.steer_undelivered:
+    if self.lkas_blocked and not self.lkas_setting_invalid and not self.steer_undelivered:
       if self.lkas_effective == 0 and abs(lkas_request) > self.params.STEER_UNDELIVERED_MIN:
         self.steer_undelivered_frames += 1
         self.steer_undelivered = self.steer_undelivered_frames >= self.params.STEER_UNDELIVERED_FRAMES
@@ -103,6 +115,10 @@ class CarState(CarStateBase):
     self.lkas_effective = cp.vl["STEER_RATE"]["LKAS_EFFECTIVE"]
     self.lkas_track_state = cp.vl["STEER_RATE"]["LKAS_TRACK_STATE"] == 1
 
+    # ZoomPilot recovery contract: Panda reports refused transmitted CAM_LKAS frames on
+    # bus 0 + 0xC0. Ignore refused zero commands while disengaged.
+    self.lkas_rejected = sum(1 for request in can_parsers[Bus.loopback].vl_all["CAM_LKAS"]["LKAS_REQUEST"] if request != 0)
+
     if self.CP.flags & MazdaFlags.STEER_TO_ZERO_EPS:
       self.update_steer_undelivered(ret.vEgoRaw, cp.vl["STEER_RATE"]["LKAS_REQUEST"])
       self.lkas_allowed_speed = True
@@ -119,8 +135,14 @@ class CarState(CarStateBase):
     ret.cruiseState.standstill = cp.vl["PEDALS"]["STANDSTILL"] == 1
     ret.cruiseState.speed = cp.vl["CRZ_EVENTS"]["CRZ_SPEED"] * CV.KPH_TO_MS
 
-    # stock lkas should be on
-    ret.invalidLkasSetting = cp_cam.vl["CAM_LANEINFO"]["LANE_LINES"] == 0
+    # Stock LKAS must remain enabled for the EPS to apply torque. CAM_SETTINGS is optional; if
+    # the car sends it, either intervention bit means enabled. Cars that do not send it keep the
+    # default True state. Preserve StarPilot's existing LANE_LINES check as the other invalid gate.
+    if len(cp_cam.vl_all["CAM_SETTINGS"]["LKAS_INERVENTION_ON1"]) > 0:
+      self.lkas_setting_on = any(cp_cam.vl["CAM_SETTINGS"][s]
+                                 for s in ("LKAS_INERVENTION_ON1", "ILKAS_NTERVENTION_ON2"))
+    ret.invalidLkasSetting = cp_cam.vl["CAM_LANEINFO"]["LANE_LINES"] == 0 or not self.lkas_setting_on
+    self.lkas_setting_invalid = ret.invalidLkasSetting
 
     if ret.cruiseState.enabled:
       if not self.lkas_allowed_speed and self.acc_active_last:
@@ -156,5 +178,12 @@ class CarState(CarStateBase):
   def get_can_parsers(CP):
     return {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], 0),
-      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [("CAM_TRAFFIC_SIGNS", 0)], 2),
+      # Optional camera messages must never affect canValid/canTimeout.
+      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [
+        ("CAM_SETTINGS", float("nan")),
+        ("CAM_TRAFFIC_SIGNS", float("nan")),
+      ], 2),
+      # Rejected outgoing bus-0 transmissions are returned by Panda on source 192. They are
+      # sporadic by definition, so this parser is also non-validity-affecting.
+      Bus.loopback: CANParser(DBC[CP.carFingerprint][Bus.pt], [("CAM_LKAS", float("nan"))], 192),
     }
