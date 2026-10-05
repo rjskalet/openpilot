@@ -87,7 +87,8 @@ class TestMazdaSafety(common.CarSafetyTest, common.DriverTorqueSteeringSafetyTes
     return self.packer.make_can_msg_panda("CRZ_CTRL", 0, values)
 
 
-class TestMazdaSteerToZeroSafety(common.DriverTorqueSteeringSafetyTest):
+class TestMazdaSteerToZeroSafetyBase(common.DriverTorqueSteeringSafetyTest):
+  TX_MSGS = [[0x243, 0], [0x09d, 0], [0x440, 0]]
   MAX_RATE_UP = 12
   MAX_RATE_DOWN = 12
   MAX_TORQUE_LOOKUP = [0], [1200]
@@ -113,6 +114,12 @@ class TestMazdaSteerToZeroSafety(common.DriverTorqueSteeringSafetyTest):
   def _speed_msg(self, speed):
     values = {"SPEED": speed}
     return self.packer.make_can_msg_safety("ENGINE_DATA", 0, values)
+
+  def test_controls_not_allowed_steering(self):
+    self.safety.set_controls_allowed(0)
+    self.assertTrue(self._tx(self._torque_cmd_msg(0)))
+    self.assertFalse(self._tx(self._torque_cmd_msg(1)))
+    self.assertFalse(self._tx(self._torque_cmd_msg(-1)))
 
 
 if __name__ == "__main__":
