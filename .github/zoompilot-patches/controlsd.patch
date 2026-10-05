@@ -1,88 +1,89 @@
-diff --git a/selfdrive/controls/controlsd.py b/selfdrive/controls/controlsd.py
---- a/selfdrive/controls/controlsd.py
-+++ b/selfdrive/controls/controlsd.py
-@@ -14,6 +14,7 @@ from opendbc.car.chrysler.values import pacifica_hybrid_aol_stock_acc_mode
- from opendbc.car.gm.values import CAR as GM_CAR
- from opendbc.car.honda.values import CAR as HONDA_CAR
- from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR
-+from opendbc.car.mazda.values import MazdaFlags
- from opendbc.car.nissan.values import CAR as NISSAN_CAR
- from opendbc.car.vehicle_model import VehicleModel
- from openpilot.selfdrive.controls.lib.drive_helpers import (
-@@ -34,6 +35,8 @@ from openpilot.selfdrive.controls.lib.latcontrol_torque import (
-   get_bolt_2017_steer_ratio_scale,
-   get_honda_accord_steer_ratio_scale,
- )
-+from openpilot.selfdrive.controls.lib.latcontrol_torque_zoompilot import LatControlTorqueZoomPilot
-+from openpilot.selfdrive.controls.lib.steer_limit_zoompilot import classify as classify_zoompilot_steer_limit
- from openpilot.selfdrive.controls.lib.longcontrol import LongControl
- from openpilot.selfdrive.car.cruise_state import should_cancel_stock_cruise
- from openpilot.selfdrive.modeld.modeld import LAT_SMOOTH_SECONDS, get_car_lateral_smooth_seconds
-@@ -401,6 +404,9 @@ class Controls:
-     cloudlog.info("controlsd got CarParams")
- 
-     self.CI = interfaces[self.CP.carFingerprint](self.CP, self.FPCP)
-+    self.zoompilot_mazda = self.CP.brand == "mazda" and bool(self.CP.flags & MazdaFlags.STEER_TO_ZERO_EPS)
-+    self._mazda_applied_torque_prev: float | None = None
- 
-     self.sm = messaging.SubMaster(['liveDelay', 'liveParameters', 'liveTorqueParameters', 'modelV2', 'selfdriveState',
-                                    'liveCalibration', 'livePose', 'longitudinalPlan', 'lateralManeuverPlan', 'carState', 'carOutput',
-@@ -437,7 +443,10 @@ class Controls:
-     elif self.CP.lateralTuning.which() == 'pid':
-       self.LaC = LatControlPID(self.CP, self.CI, DT_CTRL)
-     elif self.CP.lateralTuning.which() == 'torque':
--      self.LaC = LatControlTorque(self.CP, self.CI, DT_CTRL)
-+      if self.zoompilot_mazda:
-+        self.LaC = LatControlTorqueZoomPilot(self.CP, self.CI, DT_CTRL)
-+      else:
-+        self.LaC = LatControlTorque(self.CP, self.CI, DT_CTRL)
- 
-     self.sm = self.sm.extend(['liveDelay', 'starpilotCarState', 'starpilotPlan'])
- 
-@@ -446,7 +455,8 @@ class Controls:
-     self.ecu_disable_failed = False
-     self.ecu_disable_failed_checked = not self.CP.openpilotLongitudinalControl
- 
--    if self.CP.lateralTuning.which() == "torque" and (self.starpilot_toggles.nnff or self.starpilot_toggles.nnff_lite):
-+    if (not self.zoompilot_mazda and self.CP.lateralTuning.which() == "torque" and
-+        (self.starpilot_toggles.nnff or self.starpilot_toggles.nnff_lite)):
-       self.LaC = LatControlNNFF(self.CP, self.CI, DT_CTRL)
- 
-   def update(self):
-@@ -458,7 +468,8 @@ class Controls:
-       device_pose = Pose.from_live_pose(self.sm['livePose'])
-       self.calibrated_pose = self.pose_calibrator.build_calibrated_pose(device_pose)
- 
--    if hasattr(self.LaC, "pid") and self.CP.lateralTuning.which() != "pid":
-+    if (not self.zoompilot_mazda and hasattr(self.LaC, "pid") and
-+        self.CP.lateralTuning.which() != "pid"):
-       self.LaC.pid._k_p = self.starpilot_toggles.steerKp
- 
-     if self.sm.updated['liveDelay'] and hasattr(self.LaC, "update_live_delay"):
-@@ -881,7 +892,25 @@ class Controls:
-           self.CP, CC.actuators.steeringAngleDeg, CO, self.sm['starpilotCarControl'], output_healthy, now_nanos,
-         )
-       else:
--        self.steer_limited_by_safety = abs(CC.actuators.torque - CO.actuatorsOutput.torque) > 1e-2
-+        upstream_limited = abs(CC.actuators.torque - CO.actuatorsOutput.torque) > 1e-2
-+        if self.zoompilot_mazda and isinstance(self.LaC, LatControlTorqueZoomPilot):
-+          if not CC.latActive:
-+            self.steer_limited_by_safety = False
-+            self._mazda_applied_torque_prev = None
-+          else:
-+            applied = float(CO.actuatorsOutput.torque)
-+            scale = float(self.LaC.controller_params.STEER_MAX)
-+            limit = classify_zoompilot_steer_limit(
-+              float(CC.actuators.torque), applied, self._mazda_applied_torque_prev,
-+              self.LaC.controller_params.STEER_DELTA_UP / scale,
-+              self.LaC.controller_params.STEER_DELTA_DOWN / scale,
-+              self.LaC.rail_scale_at(CS.vEgo), upstream_limited,
-+              self.LaC.last_error, float(self.LaC.pid.i),
-+            )
-+            self.steer_limited_by_safety = limit.limited
-+            self._mazda_applied_torque_prev = applied
-+        else:
-+          self.steer_limited_by_safety = upstream_limited
- 
-     # TODO: both controlsState and carControl valids should be set by
-     #       sm.all_checks(), but this creates a circular dependency
+from pathlib import Path
+
+path = Path("selfdrive/controls/controlsd.py")
+text = path.read_text()
+
+
+def replace_once(old: str, new: str) -> None:
+  global text
+  count = text.count(old)
+  if count != 1:
+    raise RuntimeError(f"expected exactly one match, found {count}: {old[:120]!r}")
+  text = text.replace(old, new, 1)
+
+
+replace_once(
+  "from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR\nfrom opendbc.car.nissan.values import CAR as NISSAN_CAR\n",
+  "from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR\nfrom opendbc.car.mazda.values import MazdaFlags\nfrom opendbc.car.nissan.values import CAR as NISSAN_CAR\n",
+)
+
+replace_once(
+  "from openpilot.selfdrive.controls.lib.longcontrol import LongControl\n",
+  "from openpilot.selfdrive.controls.lib.latcontrol_torque_zoompilot import LatControlTorqueZoomPilot\n"
+  "from openpilot.selfdrive.controls.lib.steer_limit_zoompilot import classify as classify_zoompilot_steer_limit\n"
+  "from openpilot.selfdrive.controls.lib.longcontrol import LongControl\n",
+)
+
+replace_once(
+  "    self.CI = interfaces[self.CP.carFingerprint](self.CP, self.FPCP)\n\n"
+  "    self.sm = messaging.SubMaster([",
+  "    self.CI = interfaces[self.CP.carFingerprint](self.CP, self.FPCP)\n"
+  "    self.zoompilot_mazda = self.CP.brand == \"mazda\" and bool(self.CP.flags & MazdaFlags.STEER_TO_ZERO_EPS)\n"
+  "    self._mazda_applied_torque_prev: float | None = None\n\n"
+  "    self.sm = messaging.SubMaster([",
+)
+
+replace_once(
+  "    elif self.CP.lateralTuning.which() == 'torque':\n"
+  "      self.LaC = LatControlTorque(self.CP, self.CI, DT_CTRL)\n",
+  "    elif self.CP.lateralTuning.which() == 'torque':\n"
+  "      if self.zoompilot_mazda:\n"
+  "        self.LaC = LatControlTorqueZoomPilot(self.CP, self.CI, DT_CTRL)\n"
+  "      else:\n"
+  "        self.LaC = LatControlTorque(self.CP, self.CI, DT_CTRL)\n",
+)
+
+replace_once(
+  "    if self.CP.lateralTuning.which() == \"torque\" and (self.starpilot_toggles.nnff or self.starpilot_toggles.nnff_lite):\n"
+  "      self.LaC = LatControlNNFF(self.CP, self.CI, DT_CTRL)\n",
+  "    if (not self.zoompilot_mazda and self.CP.lateralTuning.which() == \"torque\" and\n"
+  "        (self.starpilot_toggles.nnff or self.starpilot_toggles.nnff_lite)):\n"
+  "      self.LaC = LatControlNNFF(self.CP, self.CI, DT_CTRL)\n",
+)
+
+replace_once(
+  "    if hasattr(self.LaC, \"pid\") and self.CP.lateralTuning.which() != \"pid\":\n"
+  "      self.LaC.pid._k_p = self.starpilot_toggles.steerKp\n",
+  "    if (not self.zoompilot_mazda and hasattr(self.LaC, \"pid\") and\n"
+  "        self.CP.lateralTuning.which() != \"pid\"):\n"
+  "      self.LaC.pid._k_p = self.starpilot_toggles.steerKp\n",
+)
+
+replace_once(
+  "      else:\n"
+  "        self.steer_limited_by_safety = abs(CC.actuators.torque - CO.actuatorsOutput.torque) > 1e-2\n\n"
+  "    # TODO: both controlsState and carControl valids should be set by\n",
+  "      else:\n"
+  "        upstream_limited = abs(CC.actuators.torque - CO.actuatorsOutput.torque) > 1e-2\n"
+  "        if self.zoompilot_mazda and isinstance(self.LaC, LatControlTorqueZoomPilot):\n"
+  "          if not CC.latActive:\n"
+  "            self.steer_limited_by_safety = False\n"
+  "            self._mazda_applied_torque_prev = None\n"
+  "          else:\n"
+  "            applied = float(CO.actuatorsOutput.torque)\n"
+  "            scale = float(self.LaC.controller_params.STEER_MAX)\n"
+  "            limit = classify_zoompilot_steer_limit(\n"
+  "              float(CC.actuators.torque), applied, self._mazda_applied_torque_prev,\n"
+  "              self.LaC.controller_params.STEER_DELTA_UP / scale,\n"
+  "              self.LaC.controller_params.STEER_DELTA_DOWN / scale,\n"
+  "              self.LaC.rail_scale_at(CS.vEgo), upstream_limited,\n"
+  "              self.LaC.last_error, float(self.LaC.pid.i),\n"
+  "            )\n"
+  "            self.steer_limited_by_safety = limit.limited\n"
+  "            self._mazda_applied_torque_prev = applied\n"
+  "        else:\n"
+  "          self.steer_limited_by_safety = upstream_limited\n\n"
+  "    # TODO: both controlsState and carControl valids should be set by\n",
+)
+
+path.write_text(text)
