@@ -20,7 +20,7 @@ jobs:
           ref: ${{ github.ref_name }}
           fetch-depth: 0
       - name: Apply reviewed integration patch
-        run: git apply --check .github/zoompilot-patches/controlsd.patch && git apply .github/zoompilot-patches/controlsd.patch
+        run: python .github/zoompilot-patches/controlsd.patch
       - name: Remove one-shot patcher
         run: |
           git rm .github/zoompilot-patches/controlsd.patch
