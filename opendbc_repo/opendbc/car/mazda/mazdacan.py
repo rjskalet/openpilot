@@ -63,6 +63,8 @@ def create_steering_control(packer, CP, frame, apply_torque, lkas):
 
 
 def create_alert_command(packer, cam_msg: dict, ldw: bool, steer_required: bool):
+  # Preserve the camera's LKAS state while replacing only the alert fields. In particular,
+  # ERR_BIT is real camera state and must not be zeroed just because openpilot sends the HUD frame.
   values = {s: cam_msg[s] for s in [
     "LINE_VISIBLE",
     "LINE_NOT_VISIBLE",
@@ -71,11 +73,11 @@ def create_alert_command(packer, cam_msg: dict, ldw: bool, steer_required: bool)
     "BIT2",
     "BIT3",
     "NO_ERR_BIT",
+    "ERR_BIT",
     "S1",
     "S1_HBEAM",
   ]}
   values.update({
-    # TODO: what's the difference between all these? do we need to send all?
     "HANDS_WARN_3_BITS": 0b111 if steer_required else 0,
     "HANDS_ON_STEER_WARN": steer_required,
     "HANDS_ON_STEER_WARN_2": steer_required,
