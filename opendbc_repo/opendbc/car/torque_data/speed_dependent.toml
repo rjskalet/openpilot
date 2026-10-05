@@ -1,0 +1,32 @@
+# ZoomPilot per-platform speed-binned Mazda torque seeds, in the fixed 1200-count donor units.
+# The donor 2018 CX-9 identifies as MAZDA_CX9 and intentionally inherits the CX-5 2022 table:
+# that table was learned behind the same steer-to-zero donor EPS family. `seed_version` is part
+# of cache provenance; bump it only when replacement seeds intentionally invalidate learned bins.
+
+[MAZDA_CX5_2022]
+speed_bp    = [6.5, 9.5, 12.0, 16.4, 21.0, 28.0, 34.5, 37.0]
+laf_bp      = [2.37, 2.63, 2.13, 1.74, 1.85, 2.27, 2.54, 2.56]
+friction_bp = [0.201, 0.145, 0.135, 0.134, 0.104, 0.084, 0.071, 0.070]
+seed_version = 2
+
+[MAZDA_CX9_2021]
+speed_bp    = [6.5, 9.5, 12.0, 16.4, 21.0, 28.0, 35.0]
+laf_bp      = [2.67, 2.70, 2.56, 2.30, 1.92, 2.58, 2.96]
+friction_bp = [0.161, 0.154, 0.116, 0.109, 0.091, 0.085, 0.072]
+seed_version = 1
+
+[MAZDA_CX9]
+substitute = "MAZDA_CX5_2022"
+requires_steer_to_zero = true
+
+[MAZDA_CX5]
+substitute = "MAZDA_CX5_2022"
+requires_steer_to_zero = true
+
+[MAZDA_3]
+substitute = "MAZDA_CX5_2022"
+requires_steer_to_zero = true
+
+[MAZDA_6]
+substitute = "MAZDA_CX5_2022"
+requires_steer_to_zero = true
