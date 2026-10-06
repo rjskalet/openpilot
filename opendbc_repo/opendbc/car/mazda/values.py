@@ -13,24 +13,32 @@ Ecu = CarParams.Ecu
 # Steer torque limits
 
 class CarControllerParams:
-  STEER_MAX = 800                # theoretical max_steer 2047
-  STEER_DELTA_UP = 10            # torque increase per refresh
-  STEER_DELTA_DOWN = 25          # torque decrease per refresh
   STEER_DRIVER_ALLOWANCE = 15    # allowed driver torque before start limiting
-  STEER_DRIVER_MULTIPLIER = 1    # weight driver torque
   STEER_DRIVER_FACTOR = 1        # from dbc
   STEER_STEP = 1                 # 100 Hz
 
+  # ZoomPilot keeps the torque-controller normalization fixed at 1200 counts on the donor EPS.
+  # The stock torque database is expressed on upstream Mazda's 800-count scale; interface.py
+  # converts the tune once so changing vehicle speed never changes the meaning of normalized torque.
+  EPS_STEER_MAX = 1200
+  TUNE_STEER_MAX = 800
+  TUNE_SCALE = EPS_STEER_MAX / TUNE_STEER_MAX
+
+  # Current ZoomPilot donor-EPS behavior: when the factory LKAS setting returns, the rack
+  # spends about 3 s re-arming before its block can be treated as normal steering state.
+  LKAS_REARM_T = 3.0
+
   def __init__(self, CP):
     if CP.flags & MazdaFlags.STEER_TO_ZERO_EPS:
-      # ZoomPilot's measured 2022 CX-5 EPS envelope. Keep controller and panda synchronized.
-      self.STEER_MAX = 1200
+      self.STEER_MAX = self.EPS_STEER_MAX
       self.STEER_DELTA_UP = 12
       self.STEER_DELTA_DOWN = 12
       self.STEER_DRIVER_MULTIPLIER = 15
       self.STEER_DRIVER_SAMPLES = 10
       self.STEER_DRIVER_MARGIN = 2
-      self.STEER_MAX_LOOKUP = ([0., 14.2, 14.5], [1200, 1200, 800])
+
+      # Keep normalization separate from physical EPS authority. This is ZoomPilot's measured
+      # applied-torque ceiling; it clips the wire command without rescaling the lateral tune.
       self.EPS_CEILING_LOOKUP = ([8.0, 8.5, 9.4, 10.3, 11.2, 12.1, 13.0, 13.9, 14.5],
                                  [1148, 1132, 1092, 1048, 1012, 920, 808, 676, 620])
       self.STEER_UNDELIVERED_MIN = 200
@@ -39,7 +47,8 @@ class CarControllerParams:
       self.STEER_UNDELIVERED_ALERT_MIN_SPEED = 12. * CV.MPH_TO_MS
       self.STEER_UNDELIVERED_ALERT_ORIGIN_SPEED = 1.0
     else:
-      self.STEER_MAX = 800
+      # Preserve StarPilot/upstream behavior for non-donor Mazdas.
+      self.STEER_MAX = self.TUNE_STEER_MAX
       self.STEER_DELTA_UP = 10
       self.STEER_DELTA_DOWN = 25
       self.STEER_DRIVER_MULTIPLIER = 1

@@ -14,6 +14,11 @@ on:
 permissions:
   contents: read
 
+# Architecture work lands in small reviewable commits; only the newest PR head matters.
+concurrency:
+  group: fleet-safety-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   harness:
     runs-on: ubuntu-24.04
@@ -29,6 +34,26 @@ jobs:
           selfdrive/car/tests/test_fleet_safety_core.py
           selfdrive/car/tests/test_fleet_safety_runner.py
           opendbc_repo/opendbc/safety/tests/safety_replay/test_replay_drive.py
+
+  mazda_lateral:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r selfdrive/car/tests/fleet_requirements.txt
+      - name: Mazda donor controller and state tests
+        run: >-
+          python -m pytest --noconftest -o addopts='' -q
+          opendbc_repo/opendbc/car/tests/test_mazda_donor_eps.py
+          opendbc_repo/opendbc/car/tests/test_mazda_zoompilot_delivery.py
+          selfdrive/locationd/test/test_torqued_zoompilot.py
+      - name: Mazda Panda safety tests
+        run: >-
+          python -m pytest --noconftest -o addopts='' -q
+          opendbc_repo/opendbc/safety/tests/test_mazda.py
+
   recorded_fleet:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
