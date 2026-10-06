@@ -9,7 +9,7 @@ from opendbc.car.car_helpers import interfaces
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.mazda import mazdacan
 from opendbc.car.mazda.carcontroller import CarController
-from opendbc.car.mazda.carstate import CarState
+from opendbc.car.mazda.carstate import CarState, LKAS_REARM_FRAMES
 from opendbc.car.mazda.values import CAR, STEER_TO_ZERO_EPS_FW, CarControllerParams, MazdaFlags, MazdaSafetyFlags
 
 
@@ -239,13 +239,23 @@ class TestMazdaDonorSteering:
     self.CS.lkas_effective = 0
     self.CS.update_lkas_arming(False)
     assert self.CS.lkas_arming
+    assert self.CS.lkas_arming_frames == 0
 
-    # The short clear gap after the switch returns must not release the hold early.
-    for _ in range(10):
+    # Keep the EPS blocked through the full re-arm window: elapsed time alone must not release.
+    self.CS.lkas_blocked = True
+    for _ in range(LKAS_REARM_FRAMES):
       self.CS.update_lkas_arming(False)
       assert self.CS.lkas_arming
 
-    # Actual delivery is authoritative and ends the hold immediately.
+    # Once the measured window has elapsed, the first clear block releases the hold.
+    self.CS.lkas_blocked = False
+    self.CS.update_lkas_arming(False)
+    assert not self.CS.lkas_arming
+
+    # A fresh transition can also end immediately if the EPS proves actual delivery.
+    self.CS.lkas_setting_invalid = True
+    self.CS.update_lkas_arming(False)
+    assert self.CS.lkas_arming
     self.CS.lkas_effective = 1
     self.CS.update_lkas_arming(False)
     assert not self.CS.lkas_arming
