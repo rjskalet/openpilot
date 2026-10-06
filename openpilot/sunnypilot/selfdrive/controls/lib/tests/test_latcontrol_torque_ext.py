@@ -12,8 +12,9 @@ from openpilot.cereal import log, messaging
 from opendbc.car.structs import car
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.honda.values import CAR as HONDA
-from opendbc.car.mazda.values import CAR as MAZDA, MazdaFlags
+from opendbc.car.mazda.values import CAR as MAZDA, CarControllerParams as MazdaControllerParams, MazdaFlags
 from opendbc.car.vehicle_model import VehicleModel
+from opendbc.sunnypilot.car.interfaces import get_tune_scale
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.car.helpers import convert_to_capnp
@@ -179,6 +180,17 @@ class TestMazdaSpeedDependentTorque(OpenpilotTestCase):
     assert ext.lac_torque.torque_params.latAccelOffset == ext.CP.lateralTuning.torque.latAccelOffset
     assert ext.lac_torque.torque_params.friction == ext.CP.lateralTuning.torque.friction
     ext.lac_torque.update_limits.assert_called_once()
+
+  def test_donor_nnlc_scale_preserves_wire_counts(self):
+    cp = car.CarParams(brand="mazda", carFingerprint=str(MAZDA.MAZDA_CX9),
+                       flags=int(MazdaFlags.STEER_TO_ZERO_EPS))
+    tune_scale = get_tune_scale(cp)
+    assert tune_scale == 1.5
+
+    for nn_torque in (-1.0, -0.4, 0.0, 0.4, 1.0):
+      old_counts = nn_torque * MazdaControllerParams.TUNE_STEER_MAX
+      new_counts = (nn_torque / tune_scale) * MazdaControllerParams.EPS_STEER_MAX
+      assert np.isclose(old_counts, new_counts)
 
   def test_donor_manual_override_converts_from_upstream_scale(self):
     params = Params()
