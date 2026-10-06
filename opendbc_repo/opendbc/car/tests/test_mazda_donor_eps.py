@@ -118,7 +118,7 @@ class TestMazdaDonorSteering:
       cam_lkas={"BIT_1": 0, "ERR_BIT_1": 0, "ERR_BIT_2": 0},
       cam_laneinfo={
         "LINE_VISIBLE": 0, "LINE_NOT_VISIBLE": 0, "LANE_LINES": 0,
-        "BIT1": 0, "BIT2": 0, "BIT3": 0, "NO_ERR_BIT": 0, "S1": 0, "S1_HBEAM": 0,
+        "BIT1": 0, "BIT2": 0, "BIT3": 0, "NO_ERR_BIT": 0, "ERR_BIT": 0, "S1": 0, "S1_HBEAM": 0,
       },
       lkas_allowed_speed=True,
     )
