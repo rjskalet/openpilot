@@ -1,1 +1,21 @@
-CX-9 ZoomPilot integration branch. Initial diagnostic base; Mazda steering capability will be enabled after validating the swapped EPS firmware from route data.
+CX-9 ZoomPilot integration branch.
+
+Base working branch:
+rjskalet/openpilot:sunnypilot/cx9
+e5c0d382b576195bf5cd4e24cd6157ab6c234879
+
+Current ZoomPilot architecture reference:
+zoompilot/zoompilot:develop
+b951da2e62bafcde5cc7d0a07f4a29091e97ac69
+
+Current ZoomPilot opendbc reference:
+zoompilot/opendbc
+20215891cdc3ee972fe781a430beb47de75ea26b
+
+Scope:
+Mazda lateral architecture only. Preserve factory MRCC; do not import ZoomPilot alpha-long,
+TJA/MRCC cleanup, radar takeover, or unrelated UI features.
+
+Runtime opendbc pin:
+rjskalet/opendbc:sunnypilot/cx9-zoompilot-current
+58f019f7e7b746602e3ad325b9f4b4edbd09aebe
