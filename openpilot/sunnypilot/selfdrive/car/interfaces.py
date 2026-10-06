@@ -46,9 +46,8 @@ def _seed_mazda_torque_defaults(CP: structs.CarParams, params: Params | None = N
 
   params.put_bool("EnforceTorqueControl", True)
   params.put_bool("LiveTorqueParamsToggle", True)
-  params.put_bool("SpeedDependentTorqueToggle", True)
   params.put_bool("MazdaTorqueDefaultsApplied", True)
-  cloudlog.warning("Seeded steer-to-zero Mazda torque-control defaults")
+  cloudlog.warning("Seeded steer-to-zero Mazda torque-control defaults (EnforceTorqueControl, self-tune)")
 
 
 def seed_car_defaults_offroad(params: Params) -> None:
