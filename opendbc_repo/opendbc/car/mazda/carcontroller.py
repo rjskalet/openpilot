@@ -58,7 +58,7 @@ class CarController(CarControllerBase):
 
     # ZoomPilot protection for a steer-to-zero EPS reporting sustained zero delivery, including
     # its known first-engagement standby behavior at a crawl. Recovery always starts from zero.
-    if self.steer_to_zero and (CS.steer_undelivered or CS.steer_first_engage_hold):
+    if self.steer_to_zero and (CS.steer_undelivered or CS.steer_first_engage_hold or CS.lkas_arming):
       apply_torque = 0
 
     if CC.cruiseControl.cancel:
