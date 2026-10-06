@@ -82,9 +82,10 @@ def get_speed_dep_config(CP):
 
 
 class MazdaTorqueBins:
-  def __init__(self, CP, *, min_bucket_points, factor_sanity, friction_sanity, version):
+  def __init__(self, CP, *, min_bucket_points, factor_sanity, friction_sanity, fit_points, version):
     self.CP = CP
     self.version = int(version)
+    self.fit_points = int(fit_points)
     self.params = Params()
     self.enabled = (
       CP.brand == "mazda"
@@ -125,12 +126,12 @@ class MazdaTorqueBins:
     self.speed_bin_bounds = self._centers_to_bounds(self.speed_bin_centers, cfg.get("min_speed"))
 
     n_bins = len(self.speed_bin_centers)
-    scaled_min = np.maximum(np.asarray(min_bucket_points, dtype=float) // n_bins, 1).astype(int)
+    self.scaled_min = np.maximum(np.asarray(min_bucket_points, dtype=float) // n_bins, 1).astype(int)
     self.speed_bin_points = [
       SpeedTorqueBuckets(
         x_bounds=STEER_BUCKET_BOUNDS,
-        min_points=scaled_min,
-        min_points_total=int(scaled_min.sum()),
+        min_points=self.scaled_min,
+        min_points_total=int(self.scaled_min.sum()),
         points_per_bucket=POINTS_PER_BUCKET,
         rowsize=3,
       )
@@ -259,7 +260,7 @@ class MazdaTorqueBins:
         continue
 
       try:
-        points = bucket.get_points()
+        points = bucket.get_points(self.fit_points)
         factor, _, friction = _fit_torque_points(points)
       except np.linalg.LinAlgError:
         factor = friction = np.nan
@@ -271,8 +272,8 @@ class MazdaTorqueBins:
         ).astype(int)
         self.speed_bin_points[i] = SpeedTorqueBuckets(
           x_bounds=STEER_BUCKET_BOUNDS,
-          min_points=scaled_min,
-          min_points_total=int(scaled_min.sum()),
+          min_points=self.scaled_min,
+          min_points_total=int(self.scaled_min.sum()),
           points_per_bucket=POINTS_PER_BUCKET,
           rowsize=3,
         )
@@ -299,12 +300,25 @@ class MazdaTorqueBins:
     bins.seedVersion = self.seed_version
     if self.enabled:
       bins.speedBinCenters = self.speed_bin_centers
-      bins.speedBinLatAccelFactors = [
-        float(filters["latAccelFactor"].x) for filters in self.speed_bin_filtered
-      ]
-      bins.speedBinFrictions = [
-        float(filters["frictionCoefficient"].x) for filters in self.speed_bin_filtered
-      ]
+      # On the live wire, invalid bins intentionally expose their static seeds. This is
+      # ZoomPilot's controller-side fallback moved to the producer, keeping StarPilot's
+      # controlsd independent of the TOML loader. Cache messages retain the raw filters.
+      if with_points:
+        bins.speedBinLatAccelFactors = [
+          float(filters["latAccelFactor"].x) for filters in self.speed_bin_filtered
+        ]
+        bins.speedBinFrictions = [
+          float(filters["frictionCoefficient"].x) for filters in self.speed_bin_filtered
+        ]
+      else:
+        bins.speedBinLatAccelFactors = [
+          float(self.speed_bin_filtered[i]["latAccelFactor"].x if self.speed_bin_valid[i] else self.seed_factors[i])
+          for i in range(len(self.speed_bin_centers))
+        ]
+        bins.speedBinFrictions = [
+          float(self.speed_bin_filtered[i]["frictionCoefficient"].x if self.speed_bin_valid[i] else self.seed_frictions[i])
+          for i in range(len(self.speed_bin_centers))
+        ]
       bins.speedBinValid = self.speed_bin_valid
       if with_points:
         bins.speedBinPoints = [
