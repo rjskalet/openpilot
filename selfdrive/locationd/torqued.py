@@ -11,6 +11,7 @@ from openpilot.common.realtime import config_realtime_process, DT_MDL
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.locationd.helpers import PointBuckets, ParameterEstimator, PoseCalibrator, Pose
+from openpilot.selfdrive.locationd.torqued_zoompilot import MazdaTorqueBins
 
 from openpilot.starpilot.common.starpilot_variables import get_starpilot_toggles
 
@@ -125,6 +126,22 @@ class TorqueEstimator(ParameterEstimator):
     for param in initial_params:
       self.filtered_params[param] = FirstOrderFilter(initial_params[param], self.decay, DT_MDL)
 
+    # ZoomPilot's Mazda architecture learns an independent factor/friction table by speed.
+    # It is isolated to positively identified steer-to-zero donor EPS firmware.
+    self.mazda_torque_bins = MazdaTorqueBins(
+      CP,
+      min_bucket_points=self.min_bucket_points,
+      factor_sanity=self.factor_sanity,
+      friction_sanity=self.friction_sanity,
+      fit_points=self.fit_points,
+      version=VERSION,
+    )
+    if self.mazda_torque_bins.enabled:
+      # The old ZoomPilot CX-9 defaults explicitly enabled live torque learning alongside
+      # speed-dependent torque. StarPilot has no equivalent toggle family, so donor firmware
+      # is the capability gate and stock/unknown Mazdas remain unchanged.
+      self.use_params = True
+
   @staticmethod
   def get_restore_key(CP, version):
     a, b = None, None
@@ -197,9 +214,14 @@ class TorqueEstimator(ParameterEstimator):
         vego = np.interp(t, self.raw_points['carState_t'], self.raw_points['vego'])
         steer = np.interp(t, self.raw_points['carOutput_t'], self.raw_points['steer_torque']).item()
         lateral_acc = (vego * yaw_rate) - (np.sin(roll) * ACCELERATION_DUE_TO_GRAVITY).item()
-        if all(lat_active) and not any(steer_override) and (vego > MIN_VEL) and (abs(steer) > STEER_MIN_THRESHOLD):
+        if all(lat_active) and not any(steer_override) and (abs(steer) > STEER_MIN_THRESHOLD):
           if abs(lateral_acc) <= LAT_ACC_THRESHOLD:
-            self.filtered_points.add_point(steer, lateral_acc)
+            # Upstream's global fit remains highway-only. ZoomPilot's speed bins receive the
+            # same quality-filtered point at every configured speed, including the low-speed
+            # range the donor rack was specifically tuned for.
+            if vego > MIN_VEL:
+              self.filtered_points.add_point(steer, lateral_acc)
+            self.mazda_torque_bins.on_torque_point(steer, lateral_acc, vego)
 
           if self.track_all_points:
             self.all_torque_points.append([steer, lateral_acc])
@@ -272,12 +294,17 @@ def main(demo=False):
 
     # 4Hz driven by livePose
     if sm.frame % 5 == 0:
-      pm.send('liveTorqueParameters', estimator.get_msg(valid=sm.all_checks(), with_points=DEBUG))
+      valid = sm.all_checks()
+      pm.send('liveTorqueParameters', estimator.get_msg(valid=valid, with_points=DEBUG))
+      estimator.mazda_torque_bins.publish(valid=valid)
 
-    # Cache points every 60 seconds while onroad
+    # Cache points every 60 seconds while onroad. The Mazda bin cache has its own key and
+    # provenance but deliberately shares the upstream write cadence/restore key.
     if sm.frame % 240 == 0:
-      msg = estimator.get_msg(valid=sm.all_checks(), with_points=True)
+      valid = sm.all_checks()
+      msg = estimator.get_msg(valid=valid, with_points=True)
       params.put_nonblocking("LiveTorqueParameters", msg.to_bytes())
+      estimator.mazda_torque_bins.cache(valid=valid)
 
     estimator.starpilot_toggles = get_starpilot_toggles(sm)
 
