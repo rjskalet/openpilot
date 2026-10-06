@@ -24,6 +24,10 @@ class CarControllerParams:
   TUNE_STEER_MAX = 800
   TUNE_SCALE = EPS_STEER_MAX / TUNE_STEER_MAX
 
+  # Current ZoomPilot donor-EPS behavior: when the factory LKAS setting returns, the rack
+  # spends about 3 s re-arming before its block can be treated as normal steering state.
+  LKAS_REARM_T = 3.0
+
   def __init__(self, CP):
     if CP.flags & MazdaFlags.STEER_TO_ZERO_EPS:
       self.STEER_MAX = self.EPS_STEER_MAX
