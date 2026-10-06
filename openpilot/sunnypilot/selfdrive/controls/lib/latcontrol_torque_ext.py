@@ -131,17 +131,6 @@ class LatControlTorqueExt(NeuralNetworkLateralControl, LatControlTorqueExtOverri
     self._speed_dep_lat_accel_factor_bp = [factors[i] if valid_bp[i] else fallback_factors[i] for i in range(len(speed_bp))]
     self._speed_dep_friction_bp = [frictions[i] if valid_bp[i] else fallback_frictions[i] for i in range(len(speed_bp))]
 
-    schedule = cfg.get('steer_max_schedule')
-    self._speed_dep_steer_max_schedule = schedule
-    if schedule:
-      sm_bp, sm_v = schedule
-      steer_max_at_bins = [float(np.interp(c, sm_bp, sm_v)) for c in speed_bp]
-      self._speed_dep_laf_per_count_bp = [factor / sm for factor, sm in zip(self._speed_dep_lat_accel_factor_bp, steer_max_at_bins, strict=True)]
-      self._speed_dep_friction_per_count_bp = [fric * sm for fric, sm in zip(self._speed_dep_friction_bp, steer_max_at_bins, strict=True)]
-    else:
-      self._speed_dep_laf_per_count_bp = []
-      self._speed_dep_friction_per_count_bp = []
-
     self.lac_torque.torque_params.latAccelFactor = tp.latAccelFactorFiltered
     self.lac_torque.torque_params.latAccelOffset = tp.latAccelOffsetFiltered
     self.lac_torque.torque_params.friction = tp.frictionCoefficientFiltered
