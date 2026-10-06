@@ -84,7 +84,9 @@ class LatControlTorqueZoomPilot(LatControl):
     self._speed_bin_bp: list[float] = []
     self._speed_bin_factor: list[float] = []
     self._speed_bin_friction: list[float] = []
+    self._global_lat_accel_factor = self.torque_params.latAccelFactor
     self._global_lat_accel_offset = self.torque_params.latAccelOffset
+    self._global_friction = self.torque_params.friction
 
     self.update_rail(0.0)
 
@@ -105,7 +107,9 @@ class LatControlTorqueZoomPilot(LatControl):
 
   def update_live_torque_params(self, latAccelFactor, latAccelOffset, friction):
     """StarPilot's global live-torque hook, in the donor's already-converted 1200-count units."""
+    self._global_lat_accel_factor = latAccelFactor
     self._global_lat_accel_offset = latAccelOffset
+    self._global_friction = friction
     if not self._speed_bin_active:
       self.torque_params.latAccelFactor = latAccelFactor
       self.torque_params.friction = friction
@@ -123,10 +127,18 @@ class LatControlTorqueZoomPilot(LatControl):
     self._speed_bin_active = True
 
   def clear_speed_bin_torque_params(self) -> None:
+    was_active = self._speed_bin_active
     self._speed_bin_active = False
     self._speed_bin_bp = []
     self._speed_bin_factor = []
     self._speed_bin_friction = []
+    if was_active:
+      # Never leave the last interpolated bin value latched after live torque/bin data goes
+      # unavailable or a user takes manual torque-param control.
+      self.torque_params.latAccelFactor = self._global_lat_accel_factor
+      self.torque_params.latAccelOffset = self._global_lat_accel_offset
+      self.torque_params.friction = self._global_friction
+      self.update_limits()
 
   def _apply_speed_bin_torque_params(self, v_ego: float) -> None:
     if not self._speed_bin_active:
