@@ -5,6 +5,7 @@ without importing sunnypilot's generic extension stack. The controller consumes 
 concepts: fixed 1200-count tune units, per-speed latAccelFactor/friction bins, seed fallback,
 and provenance-checked cache restore.
 """
+from collections import deque
 from pathlib import Path
 import tomllib
 
@@ -17,7 +18,6 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
 from openpilot.common.swaglog import cloudlog
-from openpilot.selfdrive.locationd.helpers import PointBuckets
 
 MAZDA_TORQUE_SERVICE = "customReserved16"
 MAZDA_TORQUE_CACHE_KEY = "LiveTorqueParametersMazda"
@@ -33,12 +33,51 @@ STEER_BUCKET_BOUNDS = [(-0.5, -0.3), (-0.3, -0.2), (-0.2, -0.1), (-0.1, 0),
                        (0, 0.1), (0.1, 0.2), (0.2, 0.3), (0.3, 0.5)]
 
 
-class SpeedTorqueBuckets(PointBuckets):
+class SpeedTorqueBuckets:
+  """Mazda-local pure-Python equivalent of locationd PointBuckets.
+
+  Keeping this primitive local avoids coupling the learner to locationd's pose/coordinate
+  extension module; torqued itself still owns the normal global PointBuckets implementation.
+  """
+  def __init__(self, x_bounds, min_points, min_points_total, points_per_bucket, rowsize):
+    self.x_bounds = list(x_bounds)
+    self.rowsize = int(rowsize)
+    self.buckets = {bounds: deque(maxlen=points_per_bucket) for bounds in self.x_bounds}
+    self.buckets_min_points = dict(zip(self.x_bounds, min_points, strict=True))
+    self.min_points_total = int(min_points_total)
+
+  def __len__(self):
+    return sum(len(bucket) for bucket in self.buckets.values())
+
+  def is_valid(self):
+    return (
+      all(len(bucket) >= min_pts for bucket, min_pts in
+          zip(self.buckets.values(), self.buckets_min_points.values(), strict=True))
+      and len(self) >= self.min_points_total
+    )
+
+  def is_calculable(self):
+    return all(len(bucket) > 0 for bucket in self.buckets.values())
+
   def add_point(self, x, y):
     for bound_min, bound_max in self.x_bounds:
       if bound_min <= x < bound_max:
         self.buckets[(bound_min, bound_max)].append([x, 1.0, y])
         break
+
+  def get_points(self, num_points=None):
+    arrays = [np.asarray(bucket, dtype=float) for bucket in self.buckets.values() if bucket]
+    if not arrays:
+      return np.empty((0, self.rowsize), dtype=float)
+    points = np.vstack(arrays)
+    if num_points is None or len(points) <= num_points:
+      return points
+    indexes = np.random.choice(np.arange(len(points)), num_points, replace=False)
+    return points[indexes]
+
+  def load_points(self, points):
+    for point in points:
+      self.add_point(*point)
 
 
 def _fit_torque_points(points):
