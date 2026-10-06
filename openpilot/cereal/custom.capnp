@@ -498,4 +498,11 @@ struct CustomReserved18 @0xc86a3d38d13eb3ef {
 }
 
 struct CustomReserved19 @0xa4f1eb3323f5f582 {
+  version @0 :Int32;
+  speedBinCenters @1 :List(Float32);
+  speedBinLatAccelFactors @2 :List(Float32);
+  speedBinFrictions @3 :List(Float32);
+  speedBinValid @4 :List(Bool);
+  speedBinPoints @5 :List(List(List(Float32)));
+  seedVersion @6 :Int32;
 }
