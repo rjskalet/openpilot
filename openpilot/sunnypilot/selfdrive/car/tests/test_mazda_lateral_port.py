@@ -2,6 +2,8 @@ from typing import cast
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+import numpy as np
+
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.mazda.values import CAR, MazdaFlags
 from opendbc.car.structs import car
@@ -130,6 +132,30 @@ class TestMazdaSpeedDependentConfig:
       assert abs((800.0 / old) - (1200.0 / new)) < 1e-9
     for old, new in zip(old_friction, cfg["friction_bp"][3:], strict=True):
       assert abs((old * 800.0) - (new * 1200.0)) < 1e-6
+
+  def test_flat_scale_preserves_wire_torque_through_old_scale_transition(self):
+    cfg = get_speed_dep_config_for_car(donor_eps_cp(CAR.MAZDA_CX9))
+
+    # Legacy controller behavior: seeds were interpolated in per-count space while
+    # STEER_MAX fell from 1200 to 800 between 14.2 and 14.5 m/s.
+    old_speed_bp = [12.0, 16.4]
+    old_laf_bp = [2.56, 1.53]
+    old_friction_bp = [0.116, 0.163]
+    old_steer_at_bins = [1200.0, 800.0]
+    old_laf_per_count = [v / s for v, s in zip(old_laf_bp, old_steer_at_bins, strict=True)]
+    old_friction_counts = [v * s for v, s in zip(old_friction_bp, old_steer_at_bins, strict=True)]
+
+    for speed in (12.0, 14.0, 14.2, 14.35, 14.5, 15.0, 16.4):
+      old_steer_max = float(np.interp(speed, [0.0, 14.2, 14.5], [1200.0, 1200.0, 800.0]))
+      old_laf = float(np.interp(speed, old_speed_bp, old_laf_per_count)) * old_steer_max
+      old_friction = float(np.interp(speed, old_speed_bp, old_friction_counts)) / old_steer_max
+
+      new_laf = float(np.interp(speed, cfg["speed_bp"], cfg["laf_bp"]))
+      new_friction = float(np.interp(speed, cfg["speed_bp"], cfg["friction_bp"]))
+
+      # These are the physically meaningful invariants at the controller boundary.
+      assert np.isclose(old_steer_max / old_laf, 1200.0 / new_laf)
+      assert np.isclose(old_steer_max * old_friction, 1200.0 * new_friction)
 
   def test_stock_eps_does_not_receive_donor_scale_bins(self):
     assert get_speed_dep_config_for_car(stock_eps_cp()) == {}
