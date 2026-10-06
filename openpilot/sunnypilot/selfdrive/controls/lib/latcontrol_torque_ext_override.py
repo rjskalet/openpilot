@@ -7,6 +7,7 @@ See the LICENSE.md file in the root directory for more details.
 
 import numpy as np
 
+from opendbc.sunnypilot.car.interfaces import get_tune_scale
 from openpilot.common.params import Params
 
 
@@ -25,11 +26,12 @@ class LatControlTorqueExtOverride:
     self._speed_dep_speed_bp = []
     self._speed_dep_lat_accel_factor_bp = []
     self._speed_dep_friction_bp = []
-    self._speed_dep_steer_max_schedule = None
-    self._speed_dep_laf_per_count_bp = []
-    self._speed_dep_friction_per_count_bp = []
     self._speed_dep_car_cfg = None
     self._last_vego = 0.0
+
+    # Manual overrides are typed on upstream Mazda's 800-count tune scale. Convert once at
+    # the controller boundary so the donor EPS can stay on a flat 1200-count normalization.
+    self._tune_scale = get_tune_scale(CP)
 
   def update_override_torque_params(self, torque_params) -> bool:
     # Preserve SunnyPilot v0/manual-override semantics exactly: poll every 300 frames, apply
@@ -41,22 +43,16 @@ class LatControlTorqueExtOverride:
         self.torque_override_enabled = self.params.get_bool("TorqueParamsOverrideEnabled")
 
         if self.torque_override_enabled:
-          torque_params.latAccelFactor = float(self.params.get("TorqueParamsOverrideLatAccelFactor", return_default=True))
-          torque_params.friction = float(self.params.get("TorqueParamsOverrideFriction", return_default=True))
+          torque_params.latAccelFactor = float(self.params.get("TorqueParamsOverrideLatAccelFactor", return_default=True)) * self._tune_scale
+          torque_params.friction = float(self.params.get("TorqueParamsOverrideFriction", return_default=True)) / self._tune_scale
           return True
 
       if self.torque_override_enabled:
         return False
 
     if self._speed_dep_active and self._speed_dep_speed_bp:
-      if self._speed_dep_steer_max_schedule and self._speed_dep_laf_per_count_bp:
-        sm_bp, sm_v = self._speed_dep_steer_max_schedule
-        steer_max = float(np.interp(self._last_vego, sm_bp, sm_v))
-        new_lat_accel_factor = float(np.interp(self._last_vego, self._speed_dep_speed_bp, self._speed_dep_laf_per_count_bp)) * steer_max
-        new_friction = float(np.interp(self._last_vego, self._speed_dep_speed_bp, self._speed_dep_friction_per_count_bp)) / steer_max
-      else:
-        new_lat_accel_factor = float(np.interp(self._last_vego, self._speed_dep_speed_bp, self._speed_dep_lat_accel_factor_bp))
-        new_friction = float(np.interp(self._last_vego, self._speed_dep_speed_bp, self._speed_dep_friction_bp))
+      new_lat_accel_factor = float(np.interp(self._last_vego, self._speed_dep_speed_bp, self._speed_dep_lat_accel_factor_bp))
+      new_friction = float(np.interp(self._last_vego, self._speed_dep_speed_bp, self._speed_dep_friction_bp))
 
       # Cap'n Proto stores Float32. Compare in the same precision so we don't report a change
       # and rebuild PID limits on every frame for a numerically identical value.
