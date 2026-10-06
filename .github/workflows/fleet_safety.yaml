@@ -14,6 +14,11 @@ on:
 permissions:
   contents: read
 
+# Architecture work lands in small reviewable commits; only the newest PR head matters.
+concurrency:
+  group: fleet-safety-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   harness:
     runs-on: ubuntu-24.04
