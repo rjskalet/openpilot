@@ -6,7 +6,7 @@ e5c0d382b576195bf5cd4e24cd6157ab6c234879
 
 Current ZoomPilot architecture reference:
 zoompilot/zoompilot:develop
-b951da2e62bafcde5cc7d0a07f4a29091e97ac69
+f55a1b7d3039588dc46e15eede231ba92d758d57
 
 Current ZoomPilot opendbc reference:
 zoompilot/opendbc
@@ -18,4 +18,4 @@ TJA/MRCC cleanup, radar takeover, or unrelated UI features.
 
 Runtime opendbc pin:
 rjskalet/opendbc:sunnypilot/cx9-zoompilot-current
-b070e09bf8901e316604654826d5c1fb62a248fb
+39ca4b710b37db992b68efea72788891e051f672
