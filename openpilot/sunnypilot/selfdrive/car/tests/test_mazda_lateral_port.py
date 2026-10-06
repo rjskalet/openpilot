@@ -6,7 +6,7 @@ from opendbc.car.car_helpers import interfaces
 from opendbc.car.mazda.values import CAR, MazdaFlags
 from opendbc.car.structs import car
 from opendbc.sunnypilot.car.interfaces import (get_speed_dep_config_for_car, get_steer_max_schedule,
-                                               get_steer_rail_schedule, get_steer_slew_schedule)
+                                               get_steer_rail_schedule, get_steer_slew_schedule, get_tune_scale)
 
 from openpilot.cereal import custom, messaging
 from openpilot.cereal.services import SERVICE_LIST
@@ -114,24 +114,37 @@ class TestMazdaTorqueDefaults:
 
 
 class TestMazdaSpeedDependentConfig:
-  def test_2018_cx9_alias_loads_donor_eps_table(self):
+  def test_2018_cx9_alias_loads_flat_scale_donor_eps_table(self):
     cp = donor_eps_cp(CAR.MAZDA_CX9)
     cfg = get_speed_dep_config_for_car(cp)
     assert cfg["speed_bp"] == [6.5, 9.5, 12.0, 16.4, 21.0, 28.0, 35.0]
-    assert cfg["laf_bp"] == [2.67, 2.70, 2.56, 1.53, 1.28, 1.72, 1.97]
-    assert cfg["friction_bp"] == [0.161, 0.154, 0.116, 0.163, 0.136, 0.128, 0.108]
+    assert cfg["laf_bp"] == [2.67, 2.70, 2.56, 2.295, 1.92, 2.58, 2.955]
+    assert cfg["friction_bp"] == [0.161, 0.154, 0.116, 0.1086666667, 0.0906666667, 0.0853333333, 0.072]
+    assert cfg["seed_version"] == 1
 
-  def test_donor_eps_steer_max_schedule(self):
+  def test_flat_scale_preserves_old_highway_wire_torque(self):
+    cfg = get_speed_dep_config_for_car(donor_eps_cp(CAR.MAZDA_CX9))
+    old_laf = [1.53, 1.28, 1.72, 1.97]
+    old_friction = [0.163, 0.136, 0.128, 0.108]
+    for old, new in zip(old_laf, cfg["laf_bp"][3:], strict=True):
+      assert abs((800.0 / old) - (1200.0 / new)) < 1e-9
+    for old, new in zip(old_friction, cfg["friction_bp"][3:], strict=True):
+      assert abs((old * 800.0) - (new * 1200.0)) < 1e-6
+
+  def test_stock_eps_does_not_receive_donor_scale_bins(self):
+    assert get_speed_dep_config_for_car(stock_eps_cp()) == {}
+
+  def test_donor_eps_tune_scale_and_flat_steer_max(self):
     cp = donor_eps_cp()
-    bp, values = get_steer_max_schedule(cp)
-    assert bp == [0.0, 14.2, 14.5]
-    assert values == [1200.0, 1200.0, 800.0]
+    assert get_tune_scale(cp) == 1.5
+    assert get_steer_max_schedule(cp) is None
+    assert get_tune_scale(stock_eps_cp()) == 1.0
 
   def test_donor_eps_slew_schedule_matches_12_counts(self):
     cp = donor_eps_cp()
     bp, up, down = get_steer_slew_schedule(cp)
-    assert bp == [0.0, 14.2, 14.5]
-    assert up == [12.0 / 1200.0, 12.0 / 1200.0, 12.0 / 800.0]
+    assert bp == [0.0]
+    assert up == [12.0 / 1200.0]
     assert down == up
 
   def test_measured_eps_rail_schedule_is_bounded(self):
