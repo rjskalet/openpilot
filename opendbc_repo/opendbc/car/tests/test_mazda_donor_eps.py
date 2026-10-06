@@ -113,7 +113,7 @@ class TestMazdaDonorSteering:
     self.can_parser = CANParser("mazda_2017", [("CAM_LKAS", 100)], 0)
     self.controller_state = SimpleNamespace(
       out=SimpleNamespace(vEgoRaw=10.0, steeringTorque=0.0, brakePressed=False),
-      steer_undelivered=False, steer_first_engage_hold=False, lkas_rejected=0,
+      steer_undelivered=False, steer_first_engage_hold=False, lkas_arming=False, lkas_rejected=0,
       crz_btns_counter=0,
       cam_lkas={"BIT_1": 0, "ERR_BIT_1": 0, "ERR_BIT_2": 0},
       cam_laneinfo={
@@ -231,6 +231,30 @@ class TestMazdaDonorSteering:
     loopback.update([10_000_000_000, []])
     assert not loopback.bus_timeout
     assert loopback.can_valid
+
+  def test_lkas_setting_return_holds_until_eps_rearms(self):
+    # Last frame invalid -> current setting valid starts the ZoomPilot re-arm hold.
+    self.CS.lkas_setting_invalid = True
+    self.CS.lkas_blocked = False
+    self.CS.lkas_effective = 0
+    self.CS.update_lkas_arming(False)
+    assert self.CS.lkas_arming
+
+    # The short clear gap after the switch returns must not release the hold early.
+    for _ in range(10):
+      self.CS.update_lkas_arming(False)
+      assert self.CS.lkas_arming
+
+    # Actual delivery is authoritative and ends the hold immediately.
+    self.CS.lkas_effective = 1
+    self.CS.update_lkas_arming(False)
+    assert not self.CS.lkas_arming
+
+    # The controller itself must send zero while the re-arm hold is active.
+    self.controller_state.lkas_arming = True
+    _, request, _ = self.controller_update(lat_active=True, torque=1.0)
+    assert request == 0
+    assert self.controller.apply_torque_last == 0
 
   def test_rejected_nonzero_command_restarts_ramp_from_zero(self):
     for _ in range(10):
