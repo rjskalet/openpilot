@@ -43,6 +43,7 @@ jobs:
           python -m pytest --noconftest -o addopts='' -q
           opendbc_repo/opendbc/car/tests/test_mazda_donor_eps.py
           opendbc_repo/opendbc/car/tests/test_mazda_zoompilot_delivery.py
+          selfdrive/locationd/test/test_torqued_zoompilot.py
       - name: Mazda Panda safety tests
         run: >-
           python -m pytest --noconftest -o addopts='' -q
