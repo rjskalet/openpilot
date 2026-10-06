@@ -164,7 +164,7 @@ class TorqueEstimatorExt:
     # seeds from the TOML entry, else the global offline values for every bin
     ref_lafs = cfg.get('laf_bp', [self.offline_latAccelFactor] * n_bins)
     ref_frictions = cfg.get('friction_bp', [self.offline_friction] * n_bins)
-    self.speed_bin_decays = [MIN_FILTER_DECAY] * n_bins
+    self.speed_bin_decays: list[float] = [float(MIN_FILTER_DECAY)] * n_bins
     self.speed_bin_filtered = [
       {'latAccelFactor': FirstOrderFilter(ref_lafs[i], self.speed_bin_decays[i], DT_MDL),
        'frictionCoefficient': FirstOrderFilter(ref_frictions[i], self.speed_bin_decays[i], DT_MDL)}
