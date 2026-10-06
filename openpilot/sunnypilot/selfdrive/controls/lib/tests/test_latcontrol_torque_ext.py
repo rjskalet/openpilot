@@ -137,9 +137,6 @@ class TestMazdaSpeedDependentTorque(OpenpilotTestCase):
     ext._speed_dep_speed_bp = []
     ext._speed_dep_lat_accel_factor_bp = []
     ext._speed_dep_friction_bp = []
-    ext._speed_dep_steer_max_schedule = None
-    ext._speed_dep_laf_per_count_bp = []
-    ext._speed_dep_friction_per_count_bp = []
     ext._speed_dep_car_cfg = None
     ext._last_vego = 0.0
     ext.steer_rail_schedule = None
@@ -182,6 +179,22 @@ class TestMazdaSpeedDependentTorque(OpenpilotTestCase):
     assert ext.lac_torque.torque_params.latAccelOffset == ext.CP.lateralTuning.torque.latAccelOffset
     assert ext.lac_torque.torque_params.friction == ext.CP.lateralTuning.torque.friction
     ext.lac_torque.update_limits.assert_called_once()
+
+  def test_donor_manual_override_converts_from_upstream_scale(self):
+    params = Params()
+    params.put_bool("EnforceTorqueControl", True, block=True)
+    params.put_bool("TorqueParamsOverrideEnabled", True, block=True)
+    params.put("TorqueParamsOverrideLatAccelFactor", 4.2, block=True)
+    params.put("TorqueParamsOverrideFriction", 0.3, block=True)
+
+    cp = car.CarParams(brand="mazda", carFingerprint=str(MAZDA.MAZDA_CX9),
+                       flags=int(MazdaFlags.STEER_TO_ZERO_EPS))
+    ext = LatControlTorqueExtOverride(cp)
+    torque_params = SimpleNamespace(latAccelFactor=0.0, friction=0.0)
+
+    assert ext.update_override_torque_params(torque_params) is True
+    assert np.isclose(torque_params.latAccelFactor, 6.3)
+    assert np.isclose(torque_params.friction, 0.2)
 
   def test_manual_override_takes_precedence_over_speed_bins(self):
     params = Params()
