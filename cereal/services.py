@@ -103,6 +103,7 @@ _services: dict[str, tuple] = {
   "livestreamRoadEncodeData": (False, 20., None, QueueSize.MEDIUM),
   "livestreamDriverEncodeData": (False, 20., None, QueueSize.MEDIUM),
   "customReserved9": (True, 0., 1),
+  "customReserved16": (True, 4., 1),  # Mazda speed-binned torque parameters
   "starpilotLateralState": (True, 100., 10),
   "customReservedRawData0": (True, 0.),
   "customReservedRawData1": (True, 0.),
