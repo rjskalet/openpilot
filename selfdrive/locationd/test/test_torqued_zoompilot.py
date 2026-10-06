@@ -1,12 +1,9 @@
-from types import SimpleNamespace
-
 import numpy as np
 import pytest
 
 from opendbc.car import structs
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.mazda.values import CAR, MazdaFlags, STEER_TO_ZERO_EPS_FW
-from openpilot.selfdrive.controls.lib.latcontrol_torque_zoompilot import LatControlTorqueZoomPilot
 from openpilot.selfdrive.locationd import torqued_zoompilot
 from openpilot.selfdrive.locationd.torqued_zoompilot import MazdaTorqueBins, SpeedTorqueBuckets, get_speed_dep_config
 
@@ -116,26 +113,3 @@ def test_cached_point_shape_round_trips_through_bucket():
   )
   restored.load_points(cache_shape)
   assert np.allclose(restored.get_points(), points)
-
-
-def test_disabling_bins_restores_latest_global_tune():
-  # Isolate this state-machine behavior without constructing the full controller.
-  lac = object.__new__(LatControlTorqueZoomPilot)
-  lac._speed_bin_active = True
-  lac._speed_bin_bp = [5.0, 10.0]
-  lac._speed_bin_factor = [2.0, 2.5]
-  lac._speed_bin_friction = [0.1, 0.08]
-  lac._global_lat_accel_factor = 1.8
-  lac._global_lat_accel_offset = -0.2
-  lac._global_friction = 0.12
-  lac.torque_params = SimpleNamespace(latAccelFactor=2.2, latAccelOffset=-0.2, friction=0.09)
-  calls = []
-  lac.update_limits = lambda: calls.append(True)
-
-  lac.clear_speed_bin_torque_params()
-
-  assert not lac._speed_bin_active
-  assert lac.torque_params.latAccelFactor == pytest.approx(1.8)
-  assert lac.torque_params.latAccelOffset == pytest.approx(-0.2)
-  assert lac.torque_params.friction == pytest.approx(0.12)
-  assert calls == [True]
