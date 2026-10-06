@@ -56,9 +56,17 @@ def test_cx9_donor_uses_cx5_2022_speed_table(donor_cp):
   assert cfg["laf_bp"] == [2.37, 2.63, 2.13, 1.74, 1.85, 2.27, 2.54, 2.56]
 
 
-def test_non_donor_cx9_cannot_use_donor_speed_table(donor_cp):
-  CP = donor_cp.as_builder()
-  CP.flags = int(CP.flags) & ~int(MazdaFlags.STEER_TO_ZERO_EPS)
+def test_non_donor_cx9_cannot_use_donor_speed_table():
+  CP = interfaces[CAR.MAZDA_CX9].get_params(
+    CAR.MAZDA_CX9,
+    {i: {} for i in range(8)},
+    [],
+    alpha_long=False,
+    is_release=False,
+    docs=False,
+    starpilot_toggles=None,
+  )
+  assert not CP.flags & MazdaFlags.STEER_TO_ZERO_EPS
   assert get_speed_dep_config(CP) == {}
 
 
@@ -97,7 +105,7 @@ def test_cached_point_shape_round_trips_through_bucket():
   )
   bucket.load_points([[0.2, 0.3]])
   points = bucket.get_points()
-  assert points.tolist() == pytest.approx([[0.2, 1.0, 0.3]])
+  assert np.allclose(points, [[0.2, 1.0, 0.3]])
   cache_shape = points[:, [0, 2]].tolist()
   restored = SpeedTorqueBuckets(
     x_bounds=[(-0.5, 0.5)],
@@ -107,7 +115,7 @@ def test_cached_point_shape_round_trips_through_bucket():
     rowsize=3,
   )
   restored.load_points(cache_shape)
-  assert restored.get_points().tolist() == pytest.approx(points.tolist())
+  assert np.allclose(restored.get_points(), points)
 
 
 def test_disabling_bins_restores_latest_global_tune():
