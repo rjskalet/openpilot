@@ -9,6 +9,7 @@ from typing import Any
 from opendbc.car import structs
 from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.car.mazda.values import MazdaFlags
+from opendbc.sunnypilot.car.interfaces import get_tune_scale
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.sunnypilot.selfdrive.controls.lib.nnlc.helpers import get_nn_model_path
@@ -107,6 +108,11 @@ def _initialize_intelligent_cruise_button_management(CP: structs.CarParams, CP_S
 def _initialize_torque_lateral_control(CI: CarInterfaceBase, CP: structs.CarParams, enforce_torque: bool, nnlc_enabled: bool) -> None:
   if nnlc_enabled or enforce_torque:
     CI.configure_torque_tune(CP.carFingerprint, CP.lateralTuning)
+    if CP.lateralTuning.which() == 'torque':
+      tune_scale = get_tune_scale(CP)
+      if tune_scale != 1.0:
+        CP.lateralTuning.torque.latAccelFactor *= tune_scale
+        CP.lateralTuning.torque.friction /= tune_scale
 
 
 def _cleanup_unsupported_params(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params: Params | None = None) -> None:
