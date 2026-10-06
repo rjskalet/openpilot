@@ -223,7 +223,9 @@ class TorqueEstimator(ParameterEstimator):
               self.filtered_points.add_point(steer, lateral_acc)
             self.mazda_torque_bins.on_torque_point(steer, lateral_acc, vego)
 
-          if self.track_all_points:
+          # Preserve upstream's >MIN_VEL offline-analysis scope for every platform.
+          # Mazda's dedicated bins learn low-speed points separately above.
+          if self.track_all_points and vego > MIN_VEL:
             self.all_torque_points.append([steer, lateral_acc])
 
   def get_msg(self, valid=True, with_points=False):
