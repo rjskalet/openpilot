@@ -393,10 +393,13 @@ class Controls:
     self.zoompilot_mazda = self.CP.brand == "mazda" and bool(self.CP.flags & MazdaFlags.STEER_TO_ZERO_EPS)
     self._mazda_applied_torque_prev: float | None = None
 
-    self.sm = messaging.SubMaster(['liveDelay', 'liveParameters', 'liveTorqueParameters', 'modelV2', 'selfdriveState',
-                                   'liveCalibration', 'livePose', 'longitudinalPlan', 'lateralManeuverPlan', 'carState', 'carOutput',
-                                   'starpilotCarControl',
-                                   'driverMonitoringState', 'onroadEvents', 'driverAssistance', 'radarState'], poll='selfdriveState')
+    control_services = ['liveDelay', 'liveParameters', 'liveTorqueParameters', 'modelV2', 'selfdriveState',
+                        'liveCalibration', 'livePose', 'longitudinalPlan', 'lateralManeuverPlan', 'carState', 'carOutput',
+                        'starpilotCarControl',
+                        'driverMonitoringState', 'onroadEvents', 'driverAssistance', 'radarState']
+    if self.zoompilot_mazda:
+      control_services.append('customReserved16')
+    self.sm = messaging.SubMaster(control_services, poll='selfdriveState')
     self.pm = messaging.PubMaster(['carControl', 'controlsState', 'starpilotLateralState'])
 
     self.steer_limited_by_safety = False
@@ -507,6 +510,27 @@ class Controls:
       if use_live_params or use_custom_torque_params:
         lat_accel_factor, lat_accel_offset, friction = get_torque_control_params(self.CP, torque_params, self.starpilot_toggles, use_live_params)
         self.LaC.update_live_torque_params(lat_accel_factor, lat_accel_offset, friction)
+
+      if self.zoompilot_mazda and isinstance(self.LaC, LatControlTorqueZoomPilot):
+        # The donor path mirrors ZoomPilot: live per-speed values own factor/friction only while
+        # the global live-torque source is healthy. Explicit StarPilot custom torque settings
+        # take precedence and immediately restore the global/manual values.
+        bins_ok = (
+          use_live_params
+          and not use_custom_torque_params
+          and self.sm.all_checks(['customReserved16'])
+        )
+        if bins_ok:
+          bins = self.sm['customReserved16']
+          centers = list(bins.speedBinCenters)
+          factors = list(bins.speedBinLatAccelFactors)
+          frictions = list(bins.speedBinFrictions)
+          if centers and len(centers) == len(factors) == len(frictions):
+            self.LaC.update_speed_bin_torque_params(centers, factors, frictions)
+          else:
+            self.LaC.clear_speed_bin_torque_params()
+        else:
+          self.LaC.clear_speed_bin_torque_params()
 
     long_plan = self.sm['longitudinalPlan']
     model_v2 = self.sm['modelV2']
