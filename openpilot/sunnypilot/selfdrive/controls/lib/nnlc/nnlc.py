@@ -160,7 +160,7 @@ class NeuralNetworkLateralControl(LatControlTorqueJerkAware):
     if self.model.friction_override:
       self._pid_log.error += get_friction(friction_input, self._lateral_accel_deadzone, FRICTION_THRESHOLD, self.torque_params)
 
-    self._pid_log.error *= self._nn_torque_scale  # ty: ignore[invalid-assignment]
+    self._pid_log.error *= self._nn_torque_scale
     self._ff *= self._nn_torque_scale
 
     self.update_output_torque(CS)
