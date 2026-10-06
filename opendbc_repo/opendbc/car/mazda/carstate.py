@@ -1,11 +1,12 @@
 from cereal import custom
 from opendbc.can import CANDefine, CANParser
-from opendbc.car import Bus, create_button_events, structs
+from opendbc.car import Bus, DT_CTRL, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.mazda.values import DBC, LKAS_LIMITS, CarControllerParams, MazdaFlags
 
 ButtonType = structs.CarState.ButtonEvent.Type
+LKAS_REARM_FRAMES = round(CarControllerParams.LKAS_REARM_T / DT_CTRL)
 
 
 class CarState(CarStateBase):
@@ -38,8 +39,27 @@ class CarState(CarStateBase):
     # is present, remember its setting; cars that never send it retain the permissive default.
     self.lkas_setting_on = True
     self.lkas_setting_invalid = False
+    self.lkas_arming = False
+    self.lkas_arming_frames = 0
 
     self.distance_button = 0
+
+  def update_lkas_arming(self, lkas_setting_invalid: bool) -> None:
+    # On the driver's LKAS setting returning, the donor EPS raises its normal re-arm block.
+    # Do not command into the short clear gap before that block rises. Release only after the
+    # measured ZoomPilot re-arm window has elapsed with the block clear, or the rack proves
+    # delivery first.
+    if lkas_setting_invalid:
+      self.lkas_arming = False
+      self.lkas_arming_frames = 0
+    elif self.lkas_setting_invalid:
+      self.lkas_arming = True
+      self.lkas_arming_frames = 0
+    elif self.lkas_arming:
+      self.lkas_arming_frames += 1
+      rearmed = self.lkas_arming_frames >= LKAS_REARM_FRAMES and not self.lkas_blocked
+      if rearmed or self.lkas_effective != 0:
+        self.lkas_arming = False
 
   def update_steer_undelivered(self, v_ego_raw: float, lkas_request: float) -> None:
     self.lkas_delivered |= self.lkas_effective != 0
@@ -156,6 +176,8 @@ class CarState(CarStateBase):
       self.lkas_setting_on = any(cp_cam.vl["CAM_SETTINGS"][s]
                                  for s in ("LKAS_INERVENTION_ON1", "ILKAS_NTERVENTION_ON2"))
     ret.invalidLkasSetting = cp_cam.vl["CAM_LANEINFO"]["LANE_LINES"] == 0 or not self.lkas_setting_on
+    if self.CP.flags & MazdaFlags.STEER_TO_ZERO_EPS:
+      self.update_lkas_arming(ret.invalidLkasSetting)
     self.lkas_setting_invalid = ret.invalidLkasSetting
 
     if ret.cruiseState.enabled:
