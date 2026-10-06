@@ -334,7 +334,17 @@ struct CustomReserved14 @0xb057204d7deadf3f {
 struct CustomReserved15 @0xbd443b539493bc68 {
 }
 
+# StarPilot Mazda: ZoomPilot-compatible speed-binned torque parameters. This intentionally
+# uses an existing reserved custom slot so the main Event union remains unchanged.
 struct CustomReserved16 @0xfc6241ed8877b611 {
+  version @0 :Int32;
+  speedBinCenters @1 :List(Float32);
+  speedBinLatAccelFactors @2 :List(Float32);
+  speedBinFrictions @3 :List(Float32);
+  speedBinValid @4 :List(Bool);
+  # Cache-only. Published messages leave this empty; the persisted Param carries points.
+  speedBinPoints @5 :List(List(List(Float32)));
+  seedVersion @6 :Int32;
 }
 
 struct MapdDownloadLocationDetails @0xff889853e7b0987f {
