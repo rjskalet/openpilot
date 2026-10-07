@@ -131,7 +131,8 @@ class LatControlTorqueExt(NeuralNetworkLateralControl, LatControlTorqueExtOverri
     self._speed_dep_lat_accel_factor_bp = [factors[i] if valid_bp[i] else fallback_factors[i] for i in range(len(speed_bp))]
     self._speed_dep_friction_bp = [frictions[i] if valid_bp[i] else fallback_frictions[i] for i in range(len(speed_bp))]
 
-    self.lac_torque.torque_params.latAccelFactor = tp.latAccelFactorFiltered
     self.lac_torque.torque_params.latAccelOffset = tp.latAccelOffsetFiltered
-    self.lac_torque.torque_params.friction = tp.frictionCoefficientFiltered
-    self.lac_torque.update_limits()
+    if self.CP.brand == 'mazda':
+      self.lac_torque.torque_params.latAccelFactor = tp.latAccelFactorFiltered
+      self.lac_torque.torque_params.friction = tp.frictionCoefficientFiltered
+      self.lac_torque.update_limits()
