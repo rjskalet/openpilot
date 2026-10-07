@@ -22,10 +22,23 @@ ALLOWED_CARS = ['toyota', 'hyundai', 'rivian', 'honda']
 
 DEFAULT_SPEED_BIN_BOUNDS = [(5, 8), (8, 12), (12, 18), (18, 24), (24, 29), (29, 35), (35, 40)]
 DEFAULT_SPEED_BIN_CENTERS = [6.5, 10.0, 15.0, 21.0, 26.5, 32.0, 37.5]
+SUBURBAN_LIVE_TABLE_FINGERPRINT = "CHEVROLET_SUBURBAN_CAMERA_11TH_GEN"
+SUBURBAN_MAX_LEARNING_SPEED = 38.0
+MAZDA_CX9_FINGERPRINTS = {"MAZDA_CX9", "MAZDA_CX9_2021"}
 
 LIVE_TORQUE_PARAMETERS_SP_SERVICE = "customReserved19"
 LIVE_TORQUE_PARAMETERS_SP_KEY = "LiveTorqueParametersSP"
+LIVE_TORQUE_PARAMETERS_SP_SUBURBAN_KEY = "LiveTorqueParametersSPSuburban"
+LIVE_TORQUE_PARAMETERS_SP_MAZDA_KEY = "LiveTorqueParametersSPMazda"
 LiveTorqueParametersSP = custom.CustomReserved19
+
+
+def get_speed_dep_cache_key(CP):
+  if CP.carFingerprint == SUBURBAN_LIVE_TABLE_FINGERPRINT:
+    return LIVE_TORQUE_PARAMETERS_SP_SUBURBAN_KEY
+  if CP.carFingerprint in MAZDA_CX9_FINGERPRINTS:
+    return LIVE_TORQUE_PARAMETERS_SP_MAZDA_KEY
+  return LIVE_TORQUE_PARAMETERS_SP_KEY
 
 
 class TorqueEstimatorExt:
@@ -153,6 +166,8 @@ class TorqueEstimatorExt:
   def _on_torque_point(self, steer, lateral_acc, vego):
     if not self.speed_binned:
       return
+    if self.CP.carFingerprint == SUBURBAN_LIVE_TABLE_FINGERPRINT and vego > SUBURBAN_MAX_LEARNING_SPEED:
+      return
     for i, (lo, hi) in enumerate(self.speed_bin_bounds):
       if lo <= vego < hi:
         self.speed_bin_points[i].add_point(steer, lateral_acc)
@@ -173,28 +188,36 @@ class TorqueEstimatorExt:
     if not self.speed_binned:
       return
     try:
+      from openpilot.selfdrive.locationd.torqued import TorqueEstimator, VERSION, MIN_FILTER_DECAY, MAX_FILTER_DECAY, get_torque_cache_keys
+      torque_cache_key, car_params_cache_key = get_torque_cache_keys(self.CP)
       if cache_ltp is None:
-        cache = self._params.get("LiveTorqueParameters")
+        cache = self._params.get(torque_cache_key)
+        if not cache and torque_cache_key != "LiveTorqueParameters":
+          cache = self._params.get("LiveTorqueParameters")
         if not cache:
           return
         with log.Event.from_bytes(cache) as evt:
           cache_ltp = evt.lateralTorqueParameters
       if cache_CP is None:
-        params_cache = self._params.get("CarParamsPrevRoute")
+        params_cache = self._params.get(car_params_cache_key)
+        if not params_cache and car_params_cache_key != "CarParamsPrevRoute":
+          params_cache = self._params.get("CarParamsPrevRoute")
         if not params_cache:
-          cloudlog.info("speed-dep: no CarParamsPrevRoute, restarting learning")
+          cloudlog.info(f"speed-dep: no {car_params_cache_key}, restarting learning")
           return
         with car.CarParams.from_bytes(params_cache) as msg:
           cache_CP = msg
-      from openpilot.selfdrive.locationd.torqued import TorqueEstimator, VERSION, MIN_FILTER_DECAY, MAX_FILTER_DECAY
 
       if TorqueEstimator.get_restore_key(cache_CP, cache_ltp.version) != TorqueEstimator.get_restore_key(self.CP, VERSION):
         cloudlog.info("speed-dep: cache restore key mismatch, restarting learning")
         return
       if cache_sp is None:
-        cache = self._params.get(LIVE_TORQUE_PARAMETERS_SP_KEY)
+        sp_cache_key = get_speed_dep_cache_key(self.CP)
+        cache = self._params.get(sp_cache_key)
+        if not cache and sp_cache_key != LIVE_TORQUE_PARAMETERS_SP_KEY:
+          cache = self._params.get(LIVE_TORQUE_PARAMETERS_SP_KEY)
         if not cache:
-          cloudlog.info("speed-dep: no LiveTorqueParametersSP cache, restarting learning")
+          cloudlog.info(f"speed-dep: no {sp_cache_key} cache, restarting learning")
           return
         with log.Event.from_bytes(cache) as evt:
           cache_sp = getattr(evt, LIVE_TORQUE_PARAMETERS_SP_SERVICE)
@@ -339,4 +362,8 @@ class TorqueEstimatorExt:
         self._pm = messaging.PubMaster([LIVE_TORQUE_PARAMETERS_SP_SERVICE])
       self._pm.send(LIVE_TORQUE_PARAMETERS_SP_SERVICE, self._sp_msg(msg.valid, values, with_points=False))
     if with_points and self.speed_binned:
-      self._params.put(LIVE_TORQUE_PARAMETERS_SP_KEY, self._sp_msg(msg.valid, values, with_points=True).to_bytes())
+      msg_bytes = self._sp_msg(msg.valid, values, with_points=True).to_bytes()
+      self._params.put(LIVE_TORQUE_PARAMETERS_SP_KEY, msg_bytes)
+      sp_cache_key = get_speed_dep_cache_key(self.CP)
+      if sp_cache_key != LIVE_TORQUE_PARAMETERS_SP_KEY:
+        self._params.put(sp_cache_key, msg_bytes)
