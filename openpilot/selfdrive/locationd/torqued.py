@@ -38,6 +38,21 @@ MIN_ENGAGE_BUFFER = 2  # secs
 VERSION = 1  # bump this to invalidate old parameter caches
 ALLOWED_CARS = ['toyota', 'hyundai', 'rivian', 'honda', 'volkswagen']
 
+SUBURBAN_FINGERPRINT = "CHEVROLET_SUBURBAN_CAMERA_11TH_GEN"
+MAZDA_CX9_FINGERPRINTS = {"MAZDA_CX9", "MAZDA_CX9_2021"}
+SUBURBAN_TORQUE_CACHE_KEY = "LiveTorqueParametersSuburban"
+SUBURBAN_CAR_PARAMS_CACHE_KEY = "LiveTorqueCarParamsSuburban"
+MAZDA_TORQUE_CACHE_KEY = "LiveTorqueParametersMazda"
+MAZDA_CAR_PARAMS_CACHE_KEY = "LiveTorqueCarParamsMazda"
+
+
+def get_torque_cache_keys(CP):
+  if CP.carFingerprint == SUBURBAN_FINGERPRINT:
+    return SUBURBAN_TORQUE_CACHE_KEY, SUBURBAN_CAR_PARAMS_CACHE_KEY
+  if CP.carFingerprint in MAZDA_CX9_FINGERPRINTS:
+    return MAZDA_TORQUE_CACHE_KEY, MAZDA_CAR_PARAMS_CACHE_KEY
+  return "LiveTorqueParameters", "CarParamsPrevRoute"
+
 
 def slope2rot(slope):
   sin = np.sqrt(slope ** 2 / (slope ** 2 + 1))
@@ -60,13 +75,14 @@ class TorqueEstimator(ParameterEstimator, TorqueEstimatorExt):
     self.CP = CP
     self.hist_len = int(HISTORY / DT_MDL)
     self.lag = 0.0
-    self.track_all_points = track_all_points
+    self.track_all_points = track_all_points  # for offline analysis, without max lateral accel or max steer torque filters
     if decimated:
       self.min_bucket_points: list[float] = (MIN_BUCKET_POINTS / 10).tolist()
       self.min_points_total = MIN_POINTS_TOTAL_QLOG
       self.fit_points = FIT_POINTS_TOTAL_QLOG
       self.factor_sanity = FACTOR_SANITY_QLOG
       self.friction_sanity = FRICTION_SANITY_QLOG
+
     else:
       self.min_bucket_points = MIN_BUCKET_POINTS.tolist()
       self.min_points_total = MIN_POINTS_TOTAL
@@ -84,7 +100,9 @@ class TorqueEstimator(ParameterEstimator, TorqueEstimatorExt):
       self.offline_latAccelFactor = CP.lateralTuning.torque.latAccelFactor
 
     self.calibrator = PoseCalibrator()
+
     TorqueEstimatorExt.initialize_custom_params(self, decimated)
+
     self.reset()
 
     initial_params = {
@@ -99,10 +117,32 @@ class TorqueEstimator(ParameterEstimator, TorqueEstimatorExt):
     self.min_friction = (1.0 - self.friction_sanity) * self.offline_friction
     self.max_friction = (1.0 + self.friction_sanity) * self.offline_friction
 
+    # Restore vehicle-specific torque learning when available. Migrate a matching
+    # legacy/global cache once so switching between the CX-9 and Suburban preserves learning.
     params = Params()
     self.params = params
-    params_cache = params.get("CarParamsPrevRoute")
-    torque_cache = params.get("LiveTorqueParameters")
+    torque_cache_key, car_params_cache_key = get_torque_cache_keys(CP)
+    params_cache = params.get(car_params_cache_key)
+    torque_cache = params.get(torque_cache_key)
+
+    if torque_cache_key != "LiveTorqueParameters" and (params_cache is None or torque_cache is None):
+      legacy_params_cache = params.get("CarParamsPrevRoute")
+      legacy_torque_cache = params.get("LiveTorqueParameters")
+      if legacy_params_cache is not None and legacy_torque_cache is not None:
+        try:
+          with log.Event.from_bytes(legacy_torque_cache) as legacy_evt:
+            legacy_ltp = legacy_evt.lateralTorqueParameters
+            with car.CarParams.from_bytes(legacy_params_cache) as legacy_CP:
+              legacy_matches = self.get_restore_key(legacy_CP, legacy_ltp.version) == self.get_restore_key(CP, VERSION)
+          if legacy_matches:
+            params.put(car_params_cache_key, legacy_params_cache)
+            params.put(torque_cache_key, legacy_torque_cache)
+            params_cache = legacy_params_cache
+            torque_cache = legacy_torque_cache
+            cloudlog.info(f"migrated matching {CP.carFingerprint} torque cache to vehicle-specific storage")
+        except Exception:
+          cloudlog.exception(f"failed to migrate legacy torque cache for {CP.carFingerprint}")
+
     if params_cache is not None and torque_cache is not None:
       try:
         with log.Event.from_bytes(torque_cache) as log_evt:
@@ -120,10 +160,10 @@ class TorqueEstimator(ParameterEstimator, TorqueEstimatorExt):
           initial_params['points'] = cached_points
           self.decay = cache_ltp.decay
           self.filtered_points.load_points(cached_points)
-          cloudlog.info("restored torque params from cache")
+          cloudlog.info(f"restored torque params from {torque_cache_key}")
       except Exception:
-        cloudlog.exception("failed to restore cached torque params")
-        params.remove("LiveTorqueParameters")
+        cloudlog.exception(f"failed to restore cached torque params from {torque_cache_key}")
+        params.remove(torque_cache_key)
 
     self.filtered_params = {}
     for param in initial_params:
@@ -150,6 +190,8 @@ class TorqueEstimator(ParameterEstimator, TorqueEstimatorExt):
 
   def estimate_params(self):
     points = self.filtered_points.get_points(self.fit_points)
+    # total least square solution as both x and y are noisy observations
+    # this is empirically the slope of the hysteresis parallelogram as opposed to the line through the diagonals
     try:
       _, _, v = np.linalg.svd(points, full_matrices=False)
       slope, offset = -v.T[0:2, 2] / v.T[2, 2]
@@ -175,20 +217,25 @@ class TorqueEstimator(ParameterEstimator, TorqueEstimatorExt):
       self.raw_points["steer_torque"].append(-msg.actuatorsOutput.torque)
     elif which == "carState":
       self.raw_points["carState_t"].append(t + self.lag)
+      # TODO: check if high aEgo affects resulting lateral accel
       self.raw_points["vego"].append(msg.vEgo)
       self.raw_points["steer_override"].append(msg.steeringPressed)
     elif which == "extrinsicsCalibration":
       self.calibrator.feed_extrinsics_calibration(msg)
     elif which == "lateralDelay":
       self.lag = get_lat_delay(self.params, msg.lateralDelay)
+    # calculate lateral accel from past steering torque
     elif which == "deviceMotion":
       is_valid = msg.angularVelocityDevice.valid and msg.orientationNED.valid and msg.inputsOK and msg.sensorsOK and msg.posenetOK
       if len(self.raw_points['steer_torque']) == self.hist_len and is_valid:
         t = msg.timestamp * 1e-9
         device_motion = Pose.from_device_motion(msg)
         calibrated_pose = self.calibrator.build_calibrated_pose(device_motion)
-        yaw_rate = calibrated_pose.angular_velocity.yaw
+        angular_velocity_calibrated = calibrated_pose.angular_velocity
+
+        yaw_rate = angular_velocity_calibrated.yaw
         roll = device_motion.orientation.roll
+        # check lat active up to now (without lag compensation)
         lat_active = np.interp(np.arange(t - MIN_ENGAGE_BUFFER, t + self.lag, DT_MDL),
                                self.raw_points['carControl_t'], self.raw_points['lat_active']).astype(bool)
         steer_override = np.interp(np.arange(t - MIN_ENGAGE_BUFFER, t + self.lag, DT_MDL),
@@ -212,6 +259,7 @@ class TorqueEstimator(ParameterEstimator, TorqueEstimatorExt):
     lateralTorqueParameters.version = VERSION
     lateralTorqueParameters.useParams = self.use_params
 
+    # Calculate raw estimates when possible, only update filters when enough points are gathered
     if self.filtered_points.is_calculable():
       latAccelFactor, latAccelOffset, frictionCoeff = self.estimate_params()
       lateralTorqueParameters.latAccelFactorRaw = float(latAccelFactor)
@@ -264,12 +312,23 @@ def main(demo=False):
 
     TorqueEstimatorExt.update_use_params(estimator)
 
+    # 4Hz driven by deviceMotion
     if sm.frame % 5 == 0:
       pm.send('lateralTorqueParameters', estimator.get_msg(valid=sm.all_checks(), with_points=DEBUG))
 
+    # Cache points every 60 seconds while onroad. Keep the legacy global cache for
+    # compatibility, and preserve dedicated CX-9/Suburban learning across vehicle swaps.
     if sm.frame % 240 == 0:
       msg = estimator.get_msg(valid=sm.all_checks(), with_points=True)
-      params.put("LiveTorqueParameters", msg.to_bytes())
+      msg_bytes = msg.to_bytes()
+      params.put("LiveTorqueParameters", msg_bytes)
+
+      torque_cache_key, car_params_cache_key = get_torque_cache_keys(estimator.CP)
+      if torque_cache_key != "LiveTorqueParameters":
+        params.put(torque_cache_key, msg_bytes)
+        current_car_params = params.get("CarParams")
+        if current_car_params is not None:
+          params.put(car_params_cache_key, current_car_params)
 
 
 if __name__ == "__main__":
