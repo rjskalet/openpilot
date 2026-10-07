@@ -11,10 +11,28 @@ from openpilot.sunnypilot.selfdrive.car.sync_sunnylink_params import CAR_LIST_JS
 
 ONROAD_BRIGHTNESS_MIGRATION_VERSION: str = "1.0"
 ONROAD_BRIGHTNESS_TIMER_MIGRATION_VERSION: str = "1.0"
+CAMERA_OFFSET_MIGRATION_VERSION: str = "1.0"
+CAMERA_OFFSET_LEGACY_VALUE: float = -0.08
+CAMERA_OFFSET_NEUTRAL_VALUE: float = 0.0
 
 # index → seconds mapping for OnroadScreenOffTimer (SSoT)
 ONROAD_BRIGHTNESS_TIMER_VALUES = {0: 3, 1: 5, 2: 7, 3: 10, 4: 15, 5: 30, **{i: (i - 5) * 60 for i in range(6, 16)}}
 VALID_TIMER_VALUES = set(ONROAD_BRIGHTNESS_TIMER_VALUES.values())
+
+
+def _migrate_camera_offset(_params):
+  try:
+    if _params.get("CameraOffsetMigrated") == CAMERA_OFFSET_MIGRATION_VERSION:
+      return
+
+    camera_offset = _params.get("CameraOffset")
+    if camera_offset == CAMERA_OFFSET_LEGACY_VALUE:
+      _params.put("CameraOffset", CAMERA_OFFSET_NEUTRAL_VALUE, block=True)
+      cloudlog.info("params_migration: migrated legacy CameraOffset -0.08 -> 0.0")
+
+    _params.put("CameraOffsetMigrated", CAMERA_OFFSET_MIGRATION_VERSION, block=True)
+  except Exception as e:
+    cloudlog.exception(f"Error migrating CameraOffset: {e}")
 
 
 def _resolve_brand(_params) -> str:
@@ -104,6 +122,9 @@ def _migrate_model_bundle_slots(_params):
 
 
 def run_migration(_params):
+  # Migrate the old global camera-offset default once; preserve any other user value.
+  _migrate_camera_offset(_params)
+
   # migrate OnroadScreenOffBrightness
   if _params.get("OnroadScreenOffBrightnessMigrated") != ONROAD_BRIGHTNESS_MIGRATION_VERSION:
     try:
