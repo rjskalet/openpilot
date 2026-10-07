@@ -13,7 +13,7 @@ from openpilot.cereal import log, custom
 
 from opendbc.car import structs
 from opendbc.car.mazda.values import MazdaFlags
-from opendbc.sunnypilot.car.interfaces import get_steer_slew_schedule
+from opendbc.sunnypilot.car.interfaces import get_speed_dep_config_for_car, get_steer_slew_schedule
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
@@ -39,6 +39,7 @@ class ControlsExt(ModelStateBase):
     # controller selection, rail classification, and live bins are isolated to the Mazda EPS
     # configuration this branch is intended to support.
     self._zoompilot_mazda = CP.brand == 'mazda' and bool(CP.flags & MazdaFlags.STEER_TO_ZERO_EPS)
+    self._speed_dependent_torque = bool(get_speed_dep_config_for_car(CP))
     self._steer_slew_schedule = get_steer_slew_schedule(CP) if self._zoompilot_mazda else None
     self._lat_active_last = False
     self._applied_torque_prev: float | None = None
@@ -48,7 +49,7 @@ class ControlsExt(ModelStateBase):
     cloudlog.info("controlsd_ext got CarParamsSP")
 
     self.sm_services_ext = ['radarState', 'selfdriveStateSP']
-    if self._zoompilot_mazda:
+    if self._speed_dependent_torque:
       self.sm_services_ext.append(LIVE_TORQUE_PARAMETERS_SP_SERVICE)
     self.pm_services_ext = ['carControlSP']
 
@@ -174,12 +175,11 @@ class ControlsExt(ModelStateBase):
     CC_SP = self.state_control_ext(sm)
     self.publish_ext(CC_SP, sm, pm)
 
-    if not self._zoompilot_mazda or not isinstance(self.LaC, LatControlTorqueV2):
-      return
+    if self._zoompilot_mazda and isinstance(self.LaC, LatControlTorqueV2):
+      self.reclassify_steer_limit(sm)
 
-    self.reclassify_steer_limit(sm)
-
-    if (self.CP.lateralTuning.which() == 'torque'
+    if (self._speed_dependent_torque
+        and self.CP.lateralTuning.which() == 'torque'
         and sm.updated.get('lateralTorqueParameters', False)
         and sm.all_checks(['lateralTorqueParameters'])):
       tp = sm['lateralTorqueParameters']
