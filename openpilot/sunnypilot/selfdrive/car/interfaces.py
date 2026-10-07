@@ -21,6 +21,7 @@ from openpilot.sunnypilot.sunnylink.statsd import STATSLOGSP
 
 
 MAZDA_STEER_TO_ZERO_TORQUE_TUNE = 2.0
+SUBURBAN_LIVE_TABLE_FINGERPRINT = "CHEVROLET_SUBURBAN_CAMERA_11TH_GEN"
 
 
 def log_fingerprint(CP: structs.CarParams) -> None:
@@ -52,6 +53,22 @@ def _seed_mazda_torque_defaults(CP: structs.CarParams, params: Params | None = N
   cloudlog.warning("Seeded steer-to-zero Mazda torque-control defaults")
 
 
+def _seed_suburban_live_table_defaults(CP: structs.CarParams, params: Params | None = None) -> None:
+  if CP.carFingerprint != SUBURBAN_LIVE_TABLE_FINGERPRINT:
+    return
+  if params is None:
+    params = Params()
+  if params.get_bool("SuburbanLiveTableDefaultsApplied"):
+    return
+
+  params.put_bool("EnforceTorqueControl", True, block=True)
+  params.put_bool("LiveTorqueParamsToggle", True, block=True)
+  params.put_bool("LiveTorqueParamsRelaxedToggle", True, block=True)
+  params.put_bool("SpeedDependentTorqueToggle", True, block=True)
+  params.put_bool("SuburbanLiveTableDefaultsApplied", True, block=True)
+  cloudlog.warning("Seeded Suburban live torque-table defaults")
+
+
 def seed_car_defaults_offroad(params: Params) -> None:
   CP_bytes = params.get("CarParamsPersistent")
   if CP_bytes is None:
@@ -64,6 +81,7 @@ def seed_car_defaults_offroad(params: Params) -> None:
     cloudlog.exception("seed_car_defaults_offroad: could not parse CarParamsPersistent")
     return
   _seed_mazda_torque_defaults(CP, params)
+  _seed_suburban_live_table_defaults(CP, params)
 
 
 def _enforce_torque_lateral_control(CP: structs.CarParams, params: Params | None = None, enabled: bool = False) -> bool:
@@ -146,6 +164,7 @@ def _cleanup_unsupported_params(CP: structs.CarParams, CP_SP: structs.CarParamsS
 
 def setup_interfaces(CI: CarInterfaceBase, params: Params | None = None) -> None:
   _seed_mazda_torque_defaults(CI.CP, params)
+  _seed_suburban_live_table_defaults(CI.CP, params)
   enforce_torque = _enforce_torque_lateral_control(CI.CP, params)
   nnlc_enabled = _initialize_neural_network_lateral_control(CI.CP, CI.CP_SP, params)
   _initialize_intelligent_cruise_button_management(CI.CP, CI.CP_SP, params)
