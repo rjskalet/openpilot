@@ -14,7 +14,7 @@ from openpilot.cereal import log
 from openpilot.cereal.services import SERVICE_LIST
 from openpilot.common.utils import strip_deprecated_keys
 from openpilot.common.filter_simple import FirstOrderFilter
-from openpilot.common.params import Params
+from openpilot.common.params import Params, ParamKeyFlag
 from openpilot.common.realtime import DT_HW
 from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
 from openpilot.sunnypilot.selfdrive.car.stock_ecu_handback import StockEcuHandBackGate
@@ -259,6 +259,10 @@ def hardware_thread(end_event, hw_queue) -> None:
     # keep card/pandad alive until it has restored that ECU (bounded by the hand-back gate).
     if params.get_bool("OnroadCycleRequested"):
       if stock_ecu_handback.ready(started_ts is not None):
+        # Clear stale onroad-transition state before pandad can reuse the previous CarParams /
+        # safety configuration during a software-triggered cycle. This mirrors ZoomPilot's
+        # prepare_onroad_entry() ordering while keeping our baseline hardwared structure.
+        params.clear_all(ParamKeyFlag.CLEAR_ON_ONROAD_TRANSITION)
         params.put_bool("OnroadCycleRequested", False, block=True)
         offroad_cycle_count = sm.frame
     else:
