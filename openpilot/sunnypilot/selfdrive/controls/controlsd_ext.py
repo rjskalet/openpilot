@@ -6,10 +6,14 @@ See the LICENSE.md file in the root directory for more details.
 """
 import time
 
+import numpy as np
+
 import openpilot.cereal.messaging as messaging
 from openpilot.cereal import log, custom
 
 from opendbc.car import structs
+from opendbc.car.mazda.values import MazdaFlags
+from opendbc.sunnypilot.car.interfaces import get_speed_dep_config_for_car, get_steer_slew_schedule
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
@@ -17,6 +21,10 @@ from openpilot.sunnypilot.livedelay.helpers import get_lat_delay
 from openpilot.sunnypilot.modeld_v2.modeld_base import ModelStateBase
 from openpilot.sunnypilot.selfdrive.controls.lib.blinker_pause_lateral import BlinkerPauseLateral
 from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_v0 import LatControlTorque as LatControlTorqueV0
+from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_v2 import LatControlTorque as LatControlTorqueV2
+from openpilot.sunnypilot.selfdrive.controls.lib.steer_limit import classify
+from openpilot.sunnypilot.selfdrive.controls.lib.torque_tune import resolved_tune_version
+from openpilot.sunnypilot.selfdrive.locationd.torqued_ext import LIVE_TORQUE_PARAMETERS_SP_SERVICE
 
 
 class ControlsExt(ModelStateBase):
@@ -27,14 +35,35 @@ class ControlsExt(ModelStateBase):
     self._param_update_time: float = 0.0
     self.blinker_pause_lateral = BlinkerPauseLateral()
 
+    # Keep every non-donor-EPS car on the exact SunnyPilot path. ZoomPilot-specific services,
+    # controller selection, rail classification, and live bins are isolated to the Mazda EPS
+    # configuration this branch is intended to support.
+    self._zoompilot_mazda = CP.brand == 'mazda' and bool(CP.flags & MazdaFlags.STEER_TO_ZERO_EPS)
+    self._speed_dependent_torque = bool(get_speed_dep_config_for_car(CP))
+    self._steer_slew_schedule = get_steer_slew_schedule(CP) if self._zoompilot_mazda else None
+    self._lat_active_last = False
+    self._applied_torque_prev: float | None = None
+
     cloudlog.info("controlsd_ext is waiting for CarParamsSP")
     self.CP_SP = messaging.log_from_bytes(params.get("CarParamsSP", block=True), custom.CarParamsSP)
     cloudlog.info("controlsd_ext got CarParamsSP")
 
     self.sm_services_ext = ['radarState', 'selfdriveStateSP']
+    if self._speed_dependent_torque:
+      self.sm_services_ext.append(LIVE_TORQUE_PARAMETERS_SP_SERVICE)
     self.pm_services_ext = ['carControlSP']
 
   def initialize_lateral_control(self, lac, CI, dt):
+    if self._zoompilot_mazda:
+      version = resolved_tune_version(self.params, self.CP.lateralTuning.which() == 'torque')
+      if version == 0.0:
+        return LatControlTorqueV0(self.CP, self.CP_SP, CI, dt)
+      elif version == 2.0:
+        return LatControlTorqueV2(self.CP, self.CP_SP, CI, dt)
+      return lac
+
+    # Original SunnyPilot selection path for all other cars. Process replay depends on this
+    # remaining behaviorally identical to the cx9-smart-features base.
     enforce_torque_control = self.params.get_bool("EnforceTorqueControl")
     torque_versions = self.params.get("TorqueControlTune")
     if not enforce_torque_control:
@@ -57,6 +86,12 @@ class ControlsExt(ModelStateBase):
       self._param_update_time = time.monotonic()
 
   def get_lat_active(self, sm: messaging.SubMaster) -> bool:
+    lat_active = self._get_lat_active(sm)
+    if self._zoompilot_mazda:
+      self._lat_active_last = lat_active
+    return lat_active
+
+  def _get_lat_active(self, sm: messaging.SubMaster) -> bool:
     if self.blinker_pause_lateral.update(sm['carState']):
       return False
 
@@ -66,6 +101,28 @@ class ControlsExt(ModelStateBase):
 
     # MADS not available, use stock state to engage
     return bool(sm['selfdriveState'].active)
+
+  def reclassify_steer_limit(self, sm: messaging.SubMaster) -> None:
+    if not self._zoompilot_mazda or not isinstance(self.LaC, LatControlTorqueV2):
+      return
+
+    ext = getattr(self.LaC, 'extension', None)
+    if ext is None or self._steer_slew_schedule is None:
+      return
+    if not self._lat_active_last:
+      self._applied_torque_prev = None
+      return
+
+    v_ego = sm['carState'].vEgo
+    applied = float(sm['carOutput'].actuatorsOutput.torque)
+    bp, up, down = self._steer_slew_schedule
+    rail_scale = ext.rail_scale_at(v_ego)
+    limit = classify(ext.commanded_torque, applied, self._applied_torque_prev,
+                     float(np.interp(v_ego, bp, up)), float(np.interp(v_ego, bp, down)),
+                     rail_scale, self.steer_limited_by_safety, ext.last_error, ext.integrator)
+    self.steer_limited_by_safety = limit.limited
+    ext.set_actuator_state(applied, limit.at_rail)
+    self._applied_torque_prev = applied
 
   @staticmethod
   def get_lead_data(_lead, src: log.RadarState.LeadData) -> None:
@@ -117,3 +174,16 @@ class ControlsExt(ModelStateBase):
   def run_ext(self, sm: messaging.SubMaster, pm: messaging.PubMaster) -> None:
     CC_SP = self.state_control_ext(sm)
     self.publish_ext(CC_SP, sm, pm)
+
+    if self._zoompilot_mazda and isinstance(self.LaC, LatControlTorqueV2):
+      self.reclassify_steer_limit(sm)
+
+    if (self._speed_dependent_torque
+        and self.CP.lateralTuning.which() == 'torque'
+        and sm.updated.get('lateralTorqueParameters', False)
+        and sm.all_checks(['lateralTorqueParameters'])):
+      tp = sm['lateralTorqueParameters']
+      tp_sp = sm[LIVE_TORQUE_PARAMETERS_SP_SERVICE] if sm.all_checks([LIVE_TORQUE_PARAMETERS_SP_SERVICE]) else None
+      ext = getattr(self.LaC, 'extension', None)
+      if ext is not None:
+        ext.update_speed_dep_torque(tp, tp_sp)

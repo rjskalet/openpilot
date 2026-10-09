@@ -83,6 +83,13 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"LivestreamEncoderBitrate", {CLEAR_ON_MANAGER_START | DONT_LOG, INT}},
     {"LivestreamRequestKeyframe", {CLEAR_ON_MANAGER_START | DONT_LOG, BOOL}},
     {"LiveTorqueParameters", {PERSISTENT | DONT_LOG, BYTES}},
+    {"LiveTorqueParametersSuburban", {PERSISTENT | DONT_LOG, BYTES}},
+    {"LiveTorqueCarParamsSuburban", {PERSISTENT | DONT_LOG, BYTES}},
+    {"LiveTorqueParametersMazda", {PERSISTENT | DONT_LOG, BYTES}},
+    {"LiveTorqueCarParamsMazda", {PERSISTENT | DONT_LOG, BYTES}},
+    {"LiveTorqueParametersSP", {PERSISTENT | DONT_LOG, BYTES}},
+    {"LiveTorqueParametersSPSuburban", {PERSISTENT | DONT_LOG, BYTES}},
+    {"LiveTorqueParametersSPMazda", {PERSISTENT | DONT_LOG, BYTES}},
     {"LocationFilterInitialState", {PERSISTENT, BYTES}},
     {"LateralManeuverMode", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
     {"LongitudinalManeuverMode", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
@@ -245,6 +252,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
 
     // sunnypilot model params
     {"CameraOffset", {PERSISTENT | BACKUP, FLOAT, "0.0"}},
+    {"CameraOffsetMigrated", {PERSISTENT | BACKUP, STRING, "0.0"}},
     {"LagdToggle", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"LagdToggleDelay", {PERSISTENT | BACKUP, FLOAT, "0.2"}},
     {"LagdValueCache", {PERSISTENT, FLOAT, "0.2"}},
@@ -292,7 +300,11 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"LiveTorqueParamsToggle", {PERSISTENT | BACKUP , BOOL}},
     {"LiveTorqueParamsRelaxedToggle", {PERSISTENT | BACKUP , BOOL}},
     {"TorqueControlTune", {PERSISTENT | BACKUP, FLOAT, "0.0"}},
+    {"SpeedDependentTorqueToggle", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"SuburbanLiveTableDefaultsApplied", {PERSISTENT | BACKUP, BOOL}},
     {"TorqueParamsOverrideEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"TorqueParamsOverrideFriction", {PERSISTENT | BACKUP, FLOAT, "0.1"}},
     {"TorqueParamsOverrideLatAccelFactor", {PERSISTENT | BACKUP, FLOAT, "2.5"}},
+    {"MazdaTorqueDefaultsApplied", {PERSISTENT | BACKUP, BOOL}},
+    {"MazdaTorqueTuneSeeded", {PERSISTENT | BACKUP, FLOAT}},
 };
