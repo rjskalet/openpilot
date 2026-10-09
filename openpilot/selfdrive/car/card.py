@@ -24,6 +24,8 @@ from openpilot.selfdrive.car.helpers import convert_carControlSP, convert_to_cap
 
 from openpilot.sunnypilot.mads.helpers import set_alternative_experience, set_car_specific_params
 from openpilot.sunnypilot.selfdrive.car import interfaces as sunnypilot_interfaces
+from opendbc.sunnypilot.car.stock_ecu import StockEcuState
+from openpilot.sunnypilot.selfdrive.car.stock_ecu_handback import StockEcuHandBackServer
 
 REPLAY = "REPLAY" in os.environ
 
@@ -179,6 +181,7 @@ class Car:
     self.params.put("CarParamsSPPersistent", cp_sp_bytes)
 
     self.v_cruise_helper = VCruiseHelper(self.CP, self.CP_SP)
+    self.stock_ecu_handback = StockEcuHandBackServer(self.params)
 
     self.is_metric = self.params.get_bool("IsMetric")
     self.experimental_mode = self.params.get_bool("ExperimentalMode")
@@ -280,7 +283,10 @@ class Car:
     if self.sm.all_alive(['carControl']):
       # send car controls over can
       now_nanos = self.can_log_mono_time if REPLAY else int(time.monotonic() * 1e9)
-      self.last_actuators_output, can_sends = self.CI.apply(CC, convert_carControlSP(CC_SP), now_nanos)
+      cc_sp = convert_carControlSP(CC_SP)
+      stock_ecu_state = getattr(self.CI.CC, "stock_ecu_state", StockEcuState.NOT_NEEDED)
+      self.stock_ecu_handback.update(CC.enabled, stock_ecu_state, cc_sp)
+      self.last_actuators_output, can_sends = self.CI.apply(CC, cc_sp, now_nanos)
       self.pm.send('sendcan', can_list_to_can_capnp(can_sends, msgtype='sendcan', valid=CS.canValid))
 
       self.CC_prev = CC
@@ -307,6 +313,7 @@ class Car:
       # sunnypilot
       self.dynamic_experimental_control = self.params.get_bool("DynamicExperimentalControl")
       self.v_cruise_helper.read_custom_set_speed_params()
+      self.stock_ecu_handback.update_params()
 
       time.sleep(0.1)
 
