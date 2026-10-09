@@ -22,6 +22,7 @@ from openpilot.common.version import get_build_metadata
 from openpilot.common.hardware.hw import Paths
 
 from openpilot.sunnypilot.selfdrive.car.interfaces import seed_car_defaults_offroad
+from openpilot.sunnypilot.selfdrive.car.stock_ecu_handback import StockEcuHandBackGate
 from openpilot.sunnypilot.system.params_migration import run_migration
 
 
@@ -138,6 +139,8 @@ def manager_thread() -> None:
 
   started_prev = False
   ignition_prev = False
+  # Keep card/pandad alive long enough to restore any stock ECU replaced by longitudinal.
+  stop_gate = StockEcuHandBackGate(params)
 
   while True:
     sm.update(1000)
@@ -184,7 +187,7 @@ def manager_thread() -> None:
         params.put("LastManagerExitReason", f"{param} {datetime.datetime.now()}", block=True)
         cloudlog.warning(f"Shutting down manager - {param} set")
 
-    if shutdown:
+    if shutdown and stop_gate.ready(started):
       break
 
 
