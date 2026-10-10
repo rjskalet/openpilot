@@ -14,9 +14,10 @@ from openpilot.cereal import log
 from openpilot.cereal.services import SERVICE_LIST
 from openpilot.common.utils import strip_deprecated_keys
 from openpilot.common.filter_simple import FirstOrderFilter
-from openpilot.common.params import Params
+from openpilot.common.params import Params, ParamKeyFlag
 from openpilot.common.realtime import DT_HW
 from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
+from openpilot.sunnypilot.selfdrive.car.stock_ecu_handback import StockEcuHandBackGate
 from openpilot.common.hardware import HARDWARE, COMMA_HARDWARE
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.git import get_short_branch
@@ -246,6 +247,7 @@ def hardware_thread(end_event, hw_queue) -> None:
   chestnut = Chestnut()
   chestnut_status = ChestnutStatus()
   branch = get_short_branch()
+  stock_ecu_handback = StockEcuHandBackGate(params)
 
   while not end_event.is_set():
     sm.update(PANDA_STATES_TIMEOUT)
@@ -253,10 +255,18 @@ def hardware_thread(end_event, hw_queue) -> None:
     pandaStates = sm['pandaStates']
     peripheralState = sm['peripheralState']
 
-    # handle requests to cycle system started state
+    # Handle requests to cycle system started state. If longitudinal replaced a stock ECU,
+    # keep card/pandad alive until it has restored that ECU (bounded by the hand-back gate).
     if params.get_bool("OnroadCycleRequested"):
-      params.put_bool("OnroadCycleRequested", False, block=True)
-      offroad_cycle_count = sm.frame
+      if stock_ecu_handback.ready(started_ts is not None):
+        # Clear stale onroad-transition state before pandad can reuse the previous CarParams /
+        # safety configuration during a software-triggered cycle. This mirrors ZoomPilot's
+        # prepare_onroad_entry() ordering while keeping our baseline hardwared structure.
+        params.clear_all(ParamKeyFlag.CLEAR_ON_ONROAD_TRANSITION)
+        params.put_bool("OnroadCycleRequested", False, block=True)
+        offroad_cycle_count = sm.frame
+    else:
+      stock_ecu_handback.reset()
     onroad_conditions["not_onroad_cycle"] = (sm.frame - offroad_cycle_count) >= ONROAD_CYCLE_TIME * SERVICE_LIST['pandaStates'].frequency
 
     if sm.updated['pandaStates'] and len(pandaStates) > 0:
