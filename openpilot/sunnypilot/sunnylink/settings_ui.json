@@ -583,6 +583,45 @@
       "description": "Longitudinal control, speed limits, and cruise behavior",
       "sections": [
         {
+          "id": "alpha_longitudinal",
+          "title": "Alpha Longitudinal",
+          "description": "",
+          "items": [
+            {
+              "key": "AlphaLongitudinalEnabled",
+              "widget": "toggle",
+              "needs_onroad_cycle": true,
+              "title": "sunnypilot Longitudinal Control (Alpha)",
+              "description": "WARNING: sunnypilot longitudinal control is in alpha for this car and will disable Automatic Emergency Braking (AEB). On this car, sunnypilot defaults to the car's built-in ACC instead of sunnypilot's longitudinal control. Enable this to switch to sunnypilot longitudinal control. Enabling Experimental mode is recommended when enabling sunnypilot longitudinal control alpha.",
+              "visibility": [
+                {
+                  "type": "all",
+                  "conditions": [
+                    {
+                      "type": "capability",
+                      "field": "alpha_long_available",
+                      "equals": true
+                    },
+                    {
+                      "type": "not",
+                      "condition": {
+                        "type": "capability",
+                        "field": "has_icbm",
+                        "equals": true
+                      }
+                    }
+                  ]
+                }
+              ],
+              "enablement": [
+                {
+                  "type": "not_engaged"
+                }
+              ]
+            }
+          ]
+        },
+        {
           "id": "core_cruise_features",
           "title": "",
           "description": "",
@@ -1817,38 +1856,6 @@
               "enablement": [
                 {
                   "type": "offroad_only"
-                }
-              ]
-            },
-            {
-              "key": "AlphaLongitudinalEnabled",
-              "widget": "toggle",
-              "needs_onroad_cycle": true,
-              "title": "sunnypilot Longitudinal Control (Alpha)",
-              "description": "WARNING: sunnypilot longitudinal control is in alpha for this car and will disable Automatic Emergency Braking (AEB). On this car, sunnypilot defaults to the car's built-in ACC instead of sunnypilot's longitudinal control. Enable this to switch to sunnypilot longitudinal control. Enabling Experimental mode is recommended when enabling sunnypilot longitudinal control alpha. Changing this setting will restart sunnypilot if the car is powered on.",
-              "visibility": [
-                {
-                  "type": "all",
-                  "conditions": [
-                    {
-                      "type": "capability",
-                      "field": "alpha_long_available",
-                      "equals": true
-                    },
-                    {
-                      "type": "not",
-                      "condition": {
-                        "type": "capability",
-                        "field": "has_icbm",
-                        "equals": true
-                      }
-                    }
-                  ]
-                }
-              ],
-              "enablement": [
-                {
-                  "type": "not_engaged"
                 }
               ]
             },

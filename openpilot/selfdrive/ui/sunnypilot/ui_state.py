@@ -215,11 +215,13 @@ class UIStateSP:
       if not CP.enableBsm:
         self.params.remove("AutoLaneChangeBsmDelay")
     else:
-      # No CarParams: clear all car-dependent params as safety default
-      self.params.remove("EnforceTorqueControl")
-      self.params.remove("NeuralNetworkLateralControl")
-      self.params.remove("LateralJerkTorqueController")
-      self.params.remove("AlphaLongitudinalEnabled")
+      # During first-drive initialization card may seed defaults before persistent
+      # CarParams is available. Only clear car-dependent params while actually offroad.
+      if not self.started:
+        self.params.remove("EnforceTorqueControl")
+        self.params.remove("NeuralNetworkLateralControl")
+        self.params.remove("LateralJerkTorqueController")
+        self.params.remove("AlphaLongitudinalEnabled")
 
     # No longitudinal control: no experimental mode or DEC
     if not has_long:
