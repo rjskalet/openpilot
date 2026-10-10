@@ -209,7 +209,6 @@ class TestSpuriousOffroadGatesDropped(OpenpilotTestCase):
 
 class TestNotEngagedReplacement(OpenpilotTestCase):
   @parameterized.expand([
-    "AlphaLongitudinalEnabled",
     "ToyotaEnforceStockLongitudinal",
     "ToyotaStopAndGoHack",
   ], names=["key"])
@@ -220,3 +219,26 @@ class TestNotEngagedReplacement(OpenpilotTestCase):
     rule_types = _flatten_rule_types(item.get("enablement"))
     assert "offroad_only" not in rule_types, f"{key} still uses offroad_only"
     assert "not_engaged" in rule_types, f"{key} missing not_engaged"
+
+
+class TestAlphaLongitudinalToggle(OpenpilotTestCase):
+  def test_is_on_cruise_page(self, schema):
+    section = _find_section(schema, "cruise", "alpha_longitudinal")
+    assert section is not None
+    assert "AlphaLongitudinalEnabled" in {item["key"] for item in section.get("items", [])}
+
+  def test_visibility_requires_carparams_capability(self, schema):
+    item = _find_item(schema, "AlphaLongitudinalEnabled")
+    assert item is not None
+    assert _references_capability_field(item.get("visibility"), "alpha_long_available")
+
+  def test_writes_require_disengaged_and_onroad_cycle(self, schema):
+    item = _find_item(schema, "AlphaLongitudinalEnabled")
+    assert item is not None
+    assert "not_engaged" in _flatten_rule_types(item.get("enablement"))
+    assert item.get("needs_onroad_cycle") is True
+
+  def test_experimental_mode_remains_longitudinal_gated(self, schema):
+    item = _find_item(schema, "ExperimentalMode")
+    assert item is not None
+    assert _references_capability_field(item.get("enablement"), "has_longitudinal_control")
