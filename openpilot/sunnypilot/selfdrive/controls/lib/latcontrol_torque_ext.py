@@ -12,6 +12,9 @@ from openpilot.sunnypilot.selfdrive.controls.lib.nnlc.nnlc import NeuralNetworkL
 from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_ext_override import LatControlTorqueExtOverride
 
 
+SUBURBAN_LIVE_OFFSET_SHADOW_FINGERPRINT = "CHEVROLET_SUBURBAN_CAMERA_11TH_GEN"
+
+
 class LatControlTorqueExt(NeuralNetworkLateralControl, LatControlTorqueExtOverride):
   def __init__(self, lac_torque, CP, CP_SP, CI):
     NeuralNetworkLateralControl.__init__(self, lac_torque, CP, CP_SP, CI)
@@ -21,6 +24,8 @@ class LatControlTorqueExt(NeuralNetworkLateralControl, LatControlTorqueExtOverri
     self._commanded = False
     self._applied_torque = 0.0
     self._at_rail = False
+    self._live_lat_accel_offset = 0.0
+    self._applied_lat_accel_offset = 0.0
 
   def rail_scale_at(self, v_ego: float) -> float:
     if self.steer_rail_schedule is None:
@@ -38,6 +43,14 @@ class LatControlTorqueExt(NeuralNetworkLateralControl, LatControlTorqueExtOverri
   @property
   def integrator(self) -> float:
     return float(self._pid.i)
+
+  @property
+  def live_lat_accel_offset(self) -> float:
+    return self._live_lat_accel_offset
+
+  @property
+  def applied_lat_accel_offset(self) -> float:
+    return self._applied_lat_accel_offset
 
   def set_actuator_state(self, applied_torque: float, at_rail: bool) -> None:
     self._applied_torque = applied_torque
@@ -101,6 +114,8 @@ class LatControlTorqueExt(NeuralNetworkLateralControl, LatControlTorqueExtOverri
     self.lac_torque.torque_params.latAccelFactor = tune.latAccelFactor
     self.lac_torque.torque_params.latAccelOffset = tune.latAccelOffset
     self.lac_torque.torque_params.friction = tune.friction
+    self._live_lat_accel_offset = tune.latAccelOffset
+    self._applied_lat_accel_offset = tune.latAccelOffset
     self.lac_torque.update_limits()
 
   def update_speed_dep_torque(self, tp, tp_sp):
@@ -131,7 +146,12 @@ class LatControlTorqueExt(NeuralNetworkLateralControl, LatControlTorqueExtOverri
     self._speed_dep_lat_accel_factor_bp = [factors[i] if valid_bp[i] else fallback_factors[i] for i in range(len(speed_bp))]
     self._speed_dep_friction_bp = [frictions[i] if valid_bp[i] else fallback_frictions[i] for i in range(len(speed_bp))]
 
-    self.lac_torque.torque_params.latAccelOffset = tp.latAccelOffsetFiltered
+    self._live_lat_accel_offset = float(tp.latAccelOffsetFiltered)
+    # Keep learning the Suburban offset in locationd, but shadow it at actuation while
+    # its small speed-bin factors can amplify the offset into most of the steering rail.
+    self._applied_lat_accel_offset = (0.0 if self.CP.carFingerprint == SUBURBAN_LIVE_OFFSET_SHADOW_FINGERPRINT
+                                      else self._live_lat_accel_offset)
+    self.lac_torque.torque_params.latAccelOffset = self._applied_lat_accel_offset
     if self.CP.brand == 'mazda':
       self.lac_torque.torque_params.latAccelFactor = tp.latAccelFactorFiltered
       self.lac_torque.torque_params.friction = tp.frictionCoefficientFiltered

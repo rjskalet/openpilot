@@ -139,6 +139,8 @@ class TestMazdaSpeedDependentTorque(OpenpilotTestCase):
     ext._speed_dep_lat_accel_factor_bp = []
     ext._speed_dep_friction_bp = []
     ext._speed_dep_car_cfg = None
+    ext._live_lat_accel_offset = 0.0
+    ext._applied_lat_accel_offset = 0.0
     ext._last_vego = 0.0
     ext.steer_rail_schedule = None
     return ext
@@ -161,6 +163,8 @@ class TestMazdaSpeedDependentTorque(OpenpilotTestCase):
     assert ext._speed_dep_friction_bp[1] == 0.154
     assert ext.lac_torque.torque_params.latAccelFactor == 3.1
     assert ext.lac_torque.torque_params.latAccelOffset == 0.02
+    assert ext.live_lat_accel_offset == 0.02
+    assert ext.applied_lat_accel_offset == 0.02
     assert ext.lac_torque.torque_params.friction == 0.2
 
     ext._last_vego = 9.5
