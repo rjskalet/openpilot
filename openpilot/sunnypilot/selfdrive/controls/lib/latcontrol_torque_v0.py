@@ -67,6 +67,8 @@ class LatControlTorque(LatControl):
 
     pid_log = log.ControlsState.LateralTorqueState.new_message()
     pid_log.version = VERSION
+    pid_log.liveLatAccelOffset = self.extension.live_lat_accel_offset
+    pid_log.appliedLatAccelOffset = self.extension.applied_lat_accel_offset
     if not active:
       output_torque = 0.0
       pid_log.active = False

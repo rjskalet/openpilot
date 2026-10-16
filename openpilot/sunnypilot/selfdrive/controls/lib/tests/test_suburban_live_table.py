@@ -9,6 +9,7 @@ from opendbc.sunnypilot.car.interfaces import get_speed_dep_config_for_car
 
 from openpilot.common.params import Params
 from openpilot.common.test import OpenpilotTestCase
+from openpilot.cereal import log
 from openpilot.cereal.services import SERVICE_LIST
 from openpilot.selfdrive.locationd.torqued import TorqueEstimator, VERSION, get_torque_cache_keys
 from openpilot.sunnypilot.selfdrive.car.interfaces import _seed_suburban_live_table_defaults
@@ -66,6 +67,8 @@ class TestSuburbanLiveTable(OpenpilotTestCase):
     extension._speed_dep_active = False
     extension._speed_dep_car_cfg = None
     extension._speed_dep_speed_bp = []
+    extension._live_lat_accel_offset = 0.0
+    extension._applied_lat_accel_offset = 0.0
     extension.lac_torque = SimpleNamespace(
       torque_params=SimpleNamespace(latAccelFactor=1.0, latAccelOffset=0.0, friction=0.1),
     )
@@ -76,6 +79,15 @@ class TestSuburbanLiveTable(OpenpilotTestCase):
     extension.update_speed_dep_torque(tp, tp_sp)
     assert extension._speed_dep_lat_accel_factor_bp == LAF_BP
     assert extension._speed_dep_friction_bp == FRICTION_BP
+    assert extension.live_lat_accel_offset == 0.02
+    assert extension.applied_lat_accel_offset == 0.0
+    assert extension.lac_torque.torque_params.latAccelOffset == 0.0
+
+    torque_state = log.ControlsState.LateralTorqueState.new_message()
+    torque_state.liveLatAccelOffset = extension.live_lat_accel_offset
+    torque_state.appliedLatAccelOffset = extension.applied_lat_accel_offset
+    assert np.isclose(torque_state.liveLatAccelOffset, 0.02)
+    assert torque_state.appliedLatAccelOffset == 0.0
 
   def test_learning_cutoff_and_expected_bin(self):
     estimator = configured_estimator()
