@@ -159,6 +159,8 @@ class TorqueEstimatorExt:
     if (self.CP.carFingerprint == SUBURBAN_LIVE_TABLE_FINGERPRINT
         and len(ref_factors) == len(SUBURBAN_FACTOR_MAX_BP)):
       scale = float(self._params.get("SuburbanFactorFloorScale", return_default=True))
+      if not np.isfinite(scale):
+        scale = 1.0
       scale = float(np.clip(scale, SUBURBAN_FACTOR_FLOOR_SCALE_MIN, SUBURBAN_FACTOR_FLOOR_SCALE_MAX))
       return [
         (factor * scale, max((1.0 + self.factor_sanity) * factor, SUBURBAN_FACTOR_MAX_BP[i]))
