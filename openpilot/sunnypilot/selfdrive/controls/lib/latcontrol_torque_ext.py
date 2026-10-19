@@ -59,6 +59,9 @@ class LatControlTorqueExt(NeuralNetworkLateralControl, LatControlTorqueExtOverri
   def update_override_torque_params(self, torque_params) -> bool:
     self._commanded = False
     changed = LatControlTorqueExtOverride.update_override_torque_params(self, torque_params)
+    # Diagnostics must report the value actually used for this control frame, after
+    # controlsd's live-parameter copy and all per-frame overrides.
+    self._applied_lat_accel_offset = float(torque_params.latAccelOffset)
     if self.steer_rail_schedule is not None:
       rail = self.rail_scale_at(self._last_vego)
       if rail != self.lac_torque.steer_max:
