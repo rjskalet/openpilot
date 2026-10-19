@@ -146,13 +146,21 @@ class TorqueEstimatorExt:
        'frictionCoefficient': FirstOrderFilter(ref_frictions[i], self.speed_bin_decays[i], DT_MDL)}
       for i in range(n_bins)
     ]
-    self.speed_bin_lat_accel_factor_bounds = [
-      ((1.0 - self.factor_sanity) * factor, (1.0 + self.factor_sanity) * factor)
-      for factor in ref_factors
-    ]
+    self.speed_bin_lat_accel_factor_bounds = self._get_speed_bin_lat_accel_factor_bounds(ref_factors)
     self.speed_bin_friction_bounds = [
       ((1.0 - self.friction_sanity) * friction, (1.0 + self.friction_sanity) * friction)
       for friction in ref_frictions
+    ]
+
+  def _get_speed_bin_lat_accel_factor_bounds(self, ref_factors):
+    suburban_floor_scale = None
+    if self.CP.carFingerprint == SUBURBAN_LIVE_TABLE_FINGERPRINT:
+      suburban_floor_scale = float(self._params.get("SuburbanFactorFloorScale", return_default=True))
+
+    return [
+      (factor * suburban_floor_scale if suburban_floor_scale is not None else (1.0 - self.factor_sanity) * factor,
+       (1.0 + self.factor_sanity) * factor)
+      for factor in ref_factors
     ]
 
   def _make_speed_bin_bucket(self, TorqueBuckets, STEER_BUCKET_BOUNDS, POINTS_PER_BUCKET):
