@@ -67,7 +67,8 @@ class LatControlTorqueExtOverride:
     # Preserve SunnyPilot v0/manual-override semantics exactly: poll every 300 frames, apply
     # only on that poll frame, and leave those values untouched between polls. Speed-dependent
     # interpolation must never write over a manual override.
-    is_suburban = self.CP.carFingerprint == SUBURBAN_FINGERPRINT
+    cp = getattr(self, "CP", None)
+    is_suburban = cp is not None and cp.carFingerprint == SUBURBAN_FINGERPRINT
 
     if self.enforce_torque_control_toggle:
       self.frame += 1
