@@ -2,7 +2,6 @@ import math
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-
 from opendbc.car.structs import car
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import ParamKeyType, Params
