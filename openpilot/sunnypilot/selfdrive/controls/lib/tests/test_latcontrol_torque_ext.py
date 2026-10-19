@@ -23,7 +23,14 @@ from openpilot.selfdrive.locationd.helpers import Pose
 from openpilot.common.mock.generators import generate_deviceMotion
 from openpilot.sunnypilot.selfdrive.car import interfaces as sunnypilot_interfaces
 from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_ext import LatControlTorqueExt
-from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_ext_override import LatControlTorqueExtOverride
+from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_ext_override import (
+  LatControlTorqueExtOverride,
+  SUBURBAN_FACTOR_FLOOR_BP,
+  SUBURBAN_FACTOR_FLOOR_SCALE_MAX,
+  SUBURBAN_FACTOR_FLOOR_SPEED_BP,
+  SUBURBAN_FINGERPRINT,
+  get_suburban_factor_floor,
+)
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.common.test import OpenpilotTestCase
 
@@ -113,6 +120,83 @@ class TestLatControlTorqueExt(OpenpilotTestCase):
     controller, VM, _ = _make_controller(enhanced=True, nnlc=True)
     output_torque, _, pid_log = _run_update(controller, VM)
     assert pid_log.active
+
+
+class TestSuburbanSpeedDependentTorque(OpenpilotTestCase):
+  @staticmethod
+  def make_extension(live_factor=0.45, speed=35.0, floor_scale=1.0):
+    cp = car.CarParams(brand="gm", carFingerprint=SUBURBAN_FINGERPRINT)
+    cp.lateralTuning.init('torque')
+    ext = LatControlTorqueExt.__new__(LatControlTorqueExt)
+    ext.CP = cp
+    ext.params = MagicMock()
+    ext.params.get_bool.return_value = False
+    ext.params.get.return_value = floor_scale
+    ext.enforce_torque_control_toggle = True
+    ext.torque_override_enabled = False
+    ext.frame = -1
+    ext._speed_dep_active = True
+    ext._speed_dep_speed_bp = list(SUBURBAN_FACTOR_FLOOR_SPEED_BP)
+    ext._speed_dep_lat_accel_factor_bp = [live_factor] * len(SUBURBAN_FACTOR_FLOOR_SPEED_BP)
+    ext._speed_dep_friction_bp = [0.18] * len(SUBURBAN_FACTOR_FLOOR_SPEED_BP)
+    ext._speed_dep_car_cfg = None
+    ext._last_vego = speed
+    ext._suburban_factor_floor_scale = 1.0
+    ext._tune_scale = 1.0
+    ext.lac_torque = SimpleNamespace(
+      torque_params=SimpleNamespace(latAccelFactor=live_factor, latAccelOffset=-0.25, friction=0.18),
+      update_limits=MagicMock(),
+    )
+    ext.steer_rail_schedule = None
+    return ext
+
+  def test_u_floor_shape(self):
+    for speed, expected in zip(SUBURBAN_FACTOR_FLOOR_SPEED_BP, SUBURBAN_FACTOR_FLOOR_BP, strict=True):
+      assert np.isclose(get_suburban_factor_floor(speed, 1.0), expected)
+    assert np.isclose(get_suburban_factor_floor(31.5, 1.0), 1.0)
+
+  def test_low_live_factor_is_raised_to_u_floor(self):
+    ext = self.make_extension(live_factor=0.45, speed=35.0)
+
+    assert ext.update_override_torque_params(ext.lac_torque.torque_params) is True
+    assert np.isclose(ext.lac_torque.torque_params.latAccelFactor, np.float32(1.10))
+    assert ext.lac_torque.torque_params.latAccelOffset == -0.25
+
+  def test_live_factor_can_exceed_u_floor(self):
+    ext = self.make_extension(live_factor=1.25, speed=35.0)
+
+    assert ext.update_override_torque_params(ext.lac_torque.torque_params) is False
+    assert np.isclose(ext.lac_torque.torque_params.latAccelFactor, 1.25)
+
+  def test_u_floor_scale_clamps(self):
+    ext = self.make_extension(live_factor=0.45, speed=35.0, floor_scale=9.0)
+
+    assert ext.update_override_torque_params(ext.lac_torque.torque_params) is True
+    expected = 1.10 * SUBURBAN_FACTOR_FLOOR_SCALE_MAX
+    assert np.isclose(ext.lac_torque.torque_params.latAccelFactor, np.float32(expected))
+
+  def test_invalid_highway_bin_still_uses_applied_u_floor(self):
+    ext = self.make_extension(live_factor=0.45, speed=35.0)
+    ext._speed_dep_active = False
+    ext._speed_dep_car_cfg = {
+      'laf_bp': [0.680, 0.680, 0.680, 0.435, 0.469, 0.378, 0.413],
+      'friction_bp': [0.205, 0.205, 0.205, 0.195, 0.208, 0.181, 0.135],
+    }
+    tp = SimpleNamespace(useParams=True, latAccelFactorFiltered=0.68, latAccelOffsetFiltered=-0.25,
+                         frictionCoefficientFiltered=0.205)
+    tp_sp = SimpleNamespace(
+      speedBinCenters=list(SUBURBAN_FACTOR_FLOOR_SPEED_BP),
+      speedBinLatAccelFactors=[0.45] * len(SUBURBAN_FACTOR_FLOOR_SPEED_BP),
+      speedBinFrictions=[0.18] * len(SUBURBAN_FACTOR_FLOOR_SPEED_BP),
+      speedBinValid=[False] * len(SUBURBAN_FACTOR_FLOOR_SPEED_BP),
+    )
+
+    ext.update_speed_dep_torque(tp, tp_sp)
+
+    assert np.isclose(ext._speed_dep_lat_accel_factor_bp[-1], 0.413)
+    assert ext.update_override_torque_params(ext.lac_torque.torque_params) is True
+    assert np.isclose(ext.lac_torque.torque_params.latAccelFactor, np.float32(1.10))
+    assert ext.lac_torque.torque_params.latAccelOffset == -0.25
 
 
 class TestMazdaSpeedDependentTorque(OpenpilotTestCase):
