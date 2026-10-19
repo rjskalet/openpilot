@@ -99,7 +99,7 @@ class LatControlTorqueExtOverride:
         # The Suburban offset shadow must be reasserted after controlsd copies the global
         # learned torque params each frame. Otherwise the live offset silently leaks back
         # into actuation before update_speed_dep_torque runs later in the loop.
-        if is_suburban and self._speed_dep_active and torque_params.latAccelOffset != 0.0:
+        if is_suburban and torque_params.latAccelOffset != 0.0:
           torque_params.latAccelOffset = 0.0
           changed = True
         self._factor_floor = 0.0
@@ -133,14 +133,15 @@ class LatControlTorqueExtOverride:
         torque_params.friction = new_friction
         changed = True
 
-      # This is deliberately after the live/global parameter copy and on every control frame.
-      if is_suburban and torque_params.latAccelOffset != 0.0:
-        torque_params.latAccelOffset = 0.0
-        changed = True
-
     else:
       self._live_lat_accel_factor = float(torque_params.latAccelFactor)
       self._factor_floor = 0.0
+
+    # This is deliberately after the live/global parameter copy and on every control frame.
+    # Keep the Suburban offset shadow true even if the speed-bin service is briefly invalid.
+    if is_suburban and torque_params.latAccelOffset != 0.0:
+      torque_params.latAccelOffset = 0.0
+      changed = True
 
     self._applied_lat_accel_factor = float(torque_params.latAccelFactor)
     return changed
