@@ -23,6 +23,8 @@ ALLOWED_CARS = ['toyota', 'hyundai', 'rivian', 'honda']
 DEFAULT_SPEED_BIN_BOUNDS = [(5, 8), (8, 12), (12, 18), (18, 24), (24, 29), (29, 35), (35, 40)]
 DEFAULT_SPEED_BIN_CENTERS = [6.5, 10.0, 15.0, 21.0, 26.5, 32.0, 37.5]
 SUBURBAN_LIVE_TABLE_FINGERPRINT = "CHEVROLET_SUBURBAN_CAMERA_11TH_GEN"
+SUBURBAN_MIN_LEARNING_SPEED = 15.0
+SUBURBAN_MIN_YAW_LAT_ACCEL = 0.07
 SUBURBAN_MAX_LEARNING_SPEED = 38.0
 SUBURBAN_FACTOR_MAX_BP = [1.360, 1.360, 1.360, 1.200, 1.200, 1.300, 1.400]
 SUBURBAN_FACTOR_FLOOR_SCALE_MIN = 0.90
@@ -180,11 +182,18 @@ class TorqueEstimatorExt:
                          points_per_bucket=POINTS_PER_BUCKET,
                          rowsize=3)
 
-  def _on_torque_point(self, steer, lateral_acc, vego):
+  def _on_torque_point(self, steer, lateral_acc, vego, yaw_lat_accel=None):
     if not self.speed_binned:
       return
-    if self.CP.carFingerprint == SUBURBAN_LIVE_TABLE_FINGERPRINT and vego > SUBURBAN_MAX_LEARNING_SPEED:
-      return
+    if self.CP.carFingerprint == SUBURBAN_LIVE_TABLE_FINGERPRINT:
+      # The Suburban's near-straight corrections materially flatten the speed-bin fit.
+      # Learn only when the vehicle is moving fast enough and producing measurable yaw
+      # response; use pre-roll v*yaw_rate for the gate so road/body roll cannot create
+      # false excitation. Other vehicles retain the existing point-acceptance behavior.
+      if vego < SUBURBAN_MIN_LEARNING_SPEED or vego > SUBURBAN_MAX_LEARNING_SPEED:
+        return
+      if yaw_lat_accel is None or abs(yaw_lat_accel) < SUBURBAN_MIN_YAW_LAT_ACCEL:
+        return
     for i, (lo, hi) in enumerate(self.speed_bin_bounds):
       if lo <= vego < hi:
         self.speed_bin_points[i].add_point(steer, lateral_acc)
