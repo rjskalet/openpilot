@@ -9,7 +9,6 @@ from openpilot.common.test import OpenpilotTestCase
 from openpilot.selfdrive.locationd.torqued import TorqueEstimator, VERSION
 from openpilot.sunnypilot.selfdrive.locationd.torqued_ext import (LIVE_TORQUE_PARAMETERS_SP_KEY,
                                                                  LIVE_TORQUE_PARAMETERS_SP_SERVICE,
-                                                                 SUBURBAN_FACTOR_FLOOR_BP,
                                                                  SUBURBAN_FACTOR_FLOOR_SCALE_MAX,
                                                                  SUBURBAN_FACTOR_MAX_BP,
                                                                  SUBURBAN_LIVE_TABLE_FINGERPRINT,
@@ -47,7 +46,7 @@ class TestSpeedDependentTorqued:
     assert params.get_default_value("SuburbanFactorFloorScale") == 1.0
     assert params.get_type("SuburbanFactorFloorScale") == ParamKeyType.FLOAT
 
-  def test_suburban_default_factor_floor_uses_u_shape(self):
+  def test_suburban_learner_keeps_seed_floor_with_u_headroom(self):
     ext = TorqueEstimatorExt.__new__(TorqueEstimatorExt)
     ext.CP = car.CarParams(carFingerprint=SUBURBAN_LIVE_TABLE_FINGERPRINT)
     ext._params = MagicMock()
@@ -58,12 +57,12 @@ class TestSpeedDependentTorqued:
     bounds = ext._get_speed_bin_lat_accel_factor_bounds(seed_factors)
 
     assert all(math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-12)
-               for actual, expected in zip([lower for lower, _ in bounds], SUBURBAN_FACTOR_FLOOR_BP, strict=True))
+               for actual, expected in zip([lower for lower, _ in bounds], seed_factors, strict=True))
     assert all(math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-12)
                for actual, expected in zip([upper for _, upper in bounds], SUBURBAN_FACTOR_MAX_BP, strict=True))
     ext._params.get.assert_called_once_with("SuburbanFactorFloorScale", return_default=True)
 
-  def test_suburban_factor_floor_scale_is_clamped(self):
+  def test_suburban_learner_floor_scale_is_clamped(self):
     ext = TorqueEstimatorExt.__new__(TorqueEstimatorExt)
     ext.CP = car.CarParams(carFingerprint=SUBURBAN_LIVE_TABLE_FINGERPRINT)
     ext._params = MagicMock()
@@ -73,7 +72,7 @@ class TestSpeedDependentTorqued:
 
     bounds = ext._get_speed_bin_lat_accel_factor_bounds(seed_factors)
 
-    expected_floor = [factor * SUBURBAN_FACTOR_FLOOR_SCALE_MAX for factor in SUBURBAN_FACTOR_FLOOR_BP]
+    expected_floor = [factor * SUBURBAN_FACTOR_FLOOR_SCALE_MAX for factor in seed_factors]
     assert all(math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-12)
                for actual, expected in zip([lower for lower, _ in bounds], expected_floor, strict=True))
     assert all(math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-12)
