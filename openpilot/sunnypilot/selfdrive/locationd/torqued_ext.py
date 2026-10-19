@@ -24,6 +24,10 @@ DEFAULT_SPEED_BIN_BOUNDS = [(5, 8), (8, 12), (12, 18), (18, 24), (24, 29), (29, 
 DEFAULT_SPEED_BIN_CENTERS = [6.5, 10.0, 15.0, 21.0, 26.5, 32.0, 37.5]
 SUBURBAN_LIVE_TABLE_FINGERPRINT = "CHEVROLET_SUBURBAN_CAMERA_11TH_GEN"
 SUBURBAN_MAX_LEARNING_SPEED = 38.0
+SUBURBAN_FACTOR_FLOOR_BP = [0.680, 0.680, 0.650, 0.600, 0.700, 0.900, 1.100]
+SUBURBAN_FACTOR_MAX_BP = [1.360, 1.360, 1.360, 1.200, 1.200, 1.300, 1.400]
+SUBURBAN_FACTOR_FLOOR_SCALE_MIN = 0.90
+SUBURBAN_FACTOR_FLOOR_SCALE_MAX = 1.15
 MAZDA_CX9_FINGERPRINTS = {"MAZDA_CX9", "MAZDA_CX9_2021"}
 
 LIVE_TORQUE_PARAMETERS_SP_SERVICE = "customReserved19"
@@ -140,26 +144,35 @@ class TorqueEstimatorExt:
 
     ref_factors = cfg.get('laf_bp', [self.offline_latAccelFactor] * n_bins)
     ref_frictions = cfg.get('friction_bp', [self.offline_friction] * n_bins)
+    self.speed_bin_lat_accel_factor_bounds = self._get_speed_bin_lat_accel_factor_bounds(ref_factors)
+    initial_factors = [
+      float(np.clip(factor, *self.speed_bin_lat_accel_factor_bounds[i]))
+      for i, factor in enumerate(ref_factors)
+    ]
     self.speed_bin_decays: list[float] = [float(MIN_FILTER_DECAY)] * n_bins
     self.speed_bin_filtered = [
-      {'latAccelFactor': FirstOrderFilter(ref_factors[i], self.speed_bin_decays[i], DT_MDL),
+      {'latAccelFactor': FirstOrderFilter(initial_factors[i], self.speed_bin_decays[i], DT_MDL),
        'frictionCoefficient': FirstOrderFilter(ref_frictions[i], self.speed_bin_decays[i], DT_MDL)}
       for i in range(n_bins)
     ]
-    self.speed_bin_lat_accel_factor_bounds = self._get_speed_bin_lat_accel_factor_bounds(ref_factors)
     self.speed_bin_friction_bounds = [
       ((1.0 - self.friction_sanity) * friction, (1.0 + self.friction_sanity) * friction)
       for friction in ref_frictions
     ]
 
   def _get_speed_bin_lat_accel_factor_bounds(self, ref_factors):
-    suburban_floor_scale = None
-    if self.CP.carFingerprint == SUBURBAN_LIVE_TABLE_FINGERPRINT:
-      suburban_floor_scale = float(self._params.get("SuburbanFactorFloorScale", return_default=True))
+    if (self.CP.carFingerprint == SUBURBAN_LIVE_TABLE_FINGERPRINT
+        and len(ref_factors) == len(SUBURBAN_FACTOR_FLOOR_BP)):
+      scale = float(self._params.get("SuburbanFactorFloorScale", return_default=True))
+      scale = float(np.clip(scale, SUBURBAN_FACTOR_FLOOR_SCALE_MIN, SUBURBAN_FACTOR_FLOOR_SCALE_MAX))
+      return [
+        (SUBURBAN_FACTOR_FLOOR_BP[i] * scale,
+         max((1.0 + self.factor_sanity) * factor, SUBURBAN_FACTOR_MAX_BP[i]))
+        for i, factor in enumerate(ref_factors)
+      ]
 
     return [
-      (factor * suburban_floor_scale if suburban_floor_scale is not None else (1.0 - self.factor_sanity) * factor,
-       (1.0 + self.factor_sanity) * factor)
+      ((1.0 - self.factor_sanity) * factor, (1.0 + self.factor_sanity) * factor)
       for factor in ref_factors
     ]
 
