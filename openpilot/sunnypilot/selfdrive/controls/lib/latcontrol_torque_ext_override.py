@@ -20,6 +20,8 @@ SUBURBAN_FACTOR_FLOOR_POLL_FRAMES = 300
 
 
 def clamp_suburban_factor_floor_scale(scale: float) -> float:
+  if not np.isfinite(scale):
+    scale = 1.0
   return float(np.clip(scale, SUBURBAN_FACTOR_FLOOR_SCALE_MIN, SUBURBAN_FACTOR_FLOOR_SCALE_MAX))
 
 
