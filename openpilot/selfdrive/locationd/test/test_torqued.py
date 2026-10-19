@@ -1,12 +1,16 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from opendbc.car.structs import car
 from openpilot.common.filter_simple import FirstOrderFilter
+from openpilot.common.params import ParamKeyType, Params
 from openpilot.common.test import OpenpilotTestCase
 from openpilot.selfdrive.locationd.torqued import TorqueEstimator, VERSION
 from openpilot.sunnypilot.selfdrive.locationd.torqued_ext import (LIVE_TORQUE_PARAMETERS_SP_KEY,
                                                                  LIVE_TORQUE_PARAMETERS_SP_SERVICE,
+                                                                 SUBURBAN_LIVE_TABLE_FINGERPRINT,
                                                                  TorqueEstimatorExt)
 
 
@@ -35,8 +39,42 @@ class TestTorqued(OpenpilotTestCase):
 
 
 class TestSpeedDependentTorqued:
+  def test_suburban_factor_floor_param_default_and_type(self):
+    params = Params()
+
+    assert params.get_default_value("SuburbanFactorFloorScale") == 1.0
+    assert params.get_type("SuburbanFactorFloorScale") == ParamKeyType.FLOAT
+
+  def test_suburban_default_factor_floor_uses_seed_values(self):
+    ext = TorqueEstimatorExt.__new__(TorqueEstimatorExt)
+    ext.CP = car.CarParams(carFingerprint=SUBURBAN_LIVE_TABLE_FINGERPRINT)
+    ext._params = MagicMock()
+    ext._params.get.return_value = b"1.0"
+    ext.factor_sanity = 1.0
+    seed_factors = [0.680, 0.680, 0.680, 0.435, 0.469, 0.378, 0.413]
+
+    bounds = ext._get_speed_bin_lat_accel_factor_bounds(seed_factors)
+
+    assert [lower for lower, _ in bounds] == pytest.approx(seed_factors)
+    assert [upper for _, upper in bounds] == pytest.approx([factor * 2.0 for factor in seed_factors])
+    ext._params.get.assert_called_once_with("SuburbanFactorFloorScale", return_default=True)
+
+  def test_non_suburban_factor_bounds_remain_symmetric(self):
+    ext = TorqueEstimatorExt.__new__(TorqueEstimatorExt)
+    ext.CP = car.CarParams(carFingerprint="MAZDA CX-9 2016-20")
+    ext._params = MagicMock()
+    ext.factor_sanity = 0.5
+    seed_factors = [2.67, 2.70]
+
+    bounds = ext._get_speed_bin_lat_accel_factor_bounds(seed_factors)
+
+    assert [lower for lower, _ in bounds] == pytest.approx([1.335, 1.35])
+    assert [upper for _, upper in bounds] == pytest.approx([4.005, 4.05])
+    ext._params.get.assert_not_called()
+
   def test_speed_point_enters_only_matching_bin(self):
     ext = TorqueEstimatorExt.__new__(TorqueEstimatorExt)
+    ext.CP = car.CarParams(carFingerprint="MAZDA CX-9 2016-20")
     ext.speed_binned = True
     ext.speed_bin_bounds = [(5.0, 8.0), (8.0, 12.0), (12.0, 18.0)]
     ext.speed_bin_points = [MagicMock(), MagicMock(), MagicMock()]
