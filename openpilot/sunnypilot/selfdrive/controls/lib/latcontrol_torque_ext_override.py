@@ -85,7 +85,7 @@ class LatControlTorqueExtOverride:
 
     if self.enforce_torque_control_toggle:
       self.frame += 1
-      if self.frame % 300 == 0:
+      if self.frame % SUBURBAN_FACTOR_FLOOR_POLL_FRAMES == 0:
         self.torque_override_enabled = self.params.get_bool("TorqueParamsOverrideEnabled")
         if is_suburban:
           self._refresh_suburban_factor_floor_scale()
