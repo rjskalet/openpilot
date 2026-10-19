@@ -9,6 +9,9 @@ from openpilot.common.test import OpenpilotTestCase
 from openpilot.selfdrive.locationd.torqued import TorqueEstimator, VERSION
 from openpilot.sunnypilot.selfdrive.locationd.torqued_ext import (LIVE_TORQUE_PARAMETERS_SP_KEY,
                                                                  LIVE_TORQUE_PARAMETERS_SP_SERVICE,
+                                                                 SUBURBAN_FACTOR_FLOOR_BP,
+                                                                 SUBURBAN_FACTOR_FLOOR_SCALE_MAX,
+                                                                 SUBURBAN_FACTOR_MAX_BP,
                                                                  SUBURBAN_LIVE_TABLE_FINGERPRINT,
                                                                  TorqueEstimatorExt)
 
@@ -44,7 +47,7 @@ class TestSpeedDependentTorqued:
     assert params.get_default_value("SuburbanFactorFloorScale") == 1.0
     assert params.get_type("SuburbanFactorFloorScale") == ParamKeyType.FLOAT
 
-  def test_suburban_default_factor_floor_uses_seed_values(self):
+  def test_suburban_default_factor_floor_uses_u_shape(self):
     ext = TorqueEstimatorExt.__new__(TorqueEstimatorExt)
     ext.CP = car.CarParams(carFingerprint=SUBURBAN_LIVE_TABLE_FINGERPRINT)
     ext._params = MagicMock()
@@ -55,10 +58,26 @@ class TestSpeedDependentTorqued:
     bounds = ext._get_speed_bin_lat_accel_factor_bounds(seed_factors)
 
     assert all(math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-12)
-               for actual, expected in zip([lower for lower, _ in bounds], seed_factors, strict=True))
+               for actual, expected in zip([lower for lower, _ in bounds], SUBURBAN_FACTOR_FLOOR_BP, strict=True))
     assert all(math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-12)
-               for actual, expected in zip([upper for _, upper in bounds], [factor * 2.0 for factor in seed_factors], strict=True))
+               for actual, expected in zip([upper for _, upper in bounds], SUBURBAN_FACTOR_MAX_BP, strict=True))
     ext._params.get.assert_called_once_with("SuburbanFactorFloorScale", return_default=True)
+
+  def test_suburban_factor_floor_scale_is_clamped(self):
+    ext = TorqueEstimatorExt.__new__(TorqueEstimatorExt)
+    ext.CP = car.CarParams(carFingerprint=SUBURBAN_LIVE_TABLE_FINGERPRINT)
+    ext._params = MagicMock()
+    ext._params.get.return_value = b"9.0"
+    ext.factor_sanity = 1.0
+    seed_factors = [0.680, 0.680, 0.680, 0.435, 0.469, 0.378, 0.413]
+
+    bounds = ext._get_speed_bin_lat_accel_factor_bounds(seed_factors)
+
+    expected_floor = [factor * SUBURBAN_FACTOR_FLOOR_SCALE_MAX for factor in SUBURBAN_FACTOR_FLOOR_BP]
+    assert all(math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-12)
+               for actual, expected in zip([lower for lower, _ in bounds], expected_floor, strict=True))
+    assert all(math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-12)
+               for actual, expected in zip([upper for _, upper in bounds], SUBURBAN_FACTOR_MAX_BP, strict=True))
 
   def test_non_suburban_factor_bounds_remain_symmetric(self):
     ext = TorqueEstimatorExt.__new__(TorqueEstimatorExt)
