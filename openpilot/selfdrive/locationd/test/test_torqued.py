@@ -1,7 +1,7 @@
+import math
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from opendbc.car.structs import car
 from openpilot.common.filter_simple import FirstOrderFilter
@@ -55,8 +55,7 @@ class TestSpeedDependentTorqued:
 
     bounds = ext._get_speed_bin_lat_accel_factor_bounds(seed_factors)
 
-    assert [lower for lower, _ in bounds] == pytest.approx(seed_factors)
-    assert [upper for _, upper in bounds] == pytest.approx([factor * 2.0 for factor in seed_factors])
+    assert all(math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-12)\n               for actual, expected in zip([lower for lower, _ in bounds], seed_factors, strict=True))\n    assert all(math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-12)\n               for actual, expected in zip([upper for _, upper in bounds], [factor * 2.0 for factor in seed_factors], strict=True))
     ext._params.get.assert_called_once_with("SuburbanFactorFloorScale", return_default=True)
 
   def test_non_suburban_factor_bounds_remain_symmetric(self):
@@ -68,8 +67,7 @@ class TestSpeedDependentTorqued:
 
     bounds = ext._get_speed_bin_lat_accel_factor_bounds(seed_factors)
 
-    assert [lower for lower, _ in bounds] == pytest.approx([1.335, 1.35])
-    assert [upper for _, upper in bounds] == pytest.approx([4.005, 4.05])
+    assert all(math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-12)\n               for actual, expected in zip([lower for lower, _ in bounds], [1.335, 1.35], strict=True))\n    assert all(math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-12)\n               for actual, expected in zip([upper for _, upper in bounds], [4.005, 4.05], strict=True))
     ext._params.get.assert_not_called()
 
   def test_speed_point_enters_only_matching_bin(self):
