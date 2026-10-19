@@ -42,7 +42,7 @@ class TestTorqued(OpenpilotTestCase):
     assert msg.lateralTorqueParameters.calPerc == 100
 
 
-class TestSpeedDependentTorqued:
+class TestSpeedDependentTorqued(OpenpilotTestCase):
   def test_suburban_factor_floor_param_default_and_type(self):
     params = Params()
 
