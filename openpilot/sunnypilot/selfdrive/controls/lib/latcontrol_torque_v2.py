@@ -65,6 +65,11 @@ class LatControlTorque(LatControlTorqueV0):
 
     pid_log = log.ControlsState.LateralTorqueState.new_message()
     pid_log.version = VERSION
+    pid_log.liveLatAccelOffset = self.extension.live_lat_accel_offset
+    pid_log.appliedLatAccelOffset = self.extension.applied_lat_accel_offset
+    pid_log.liveLatAccelFactor = self.extension.live_lat_accel_factor
+    pid_log.factorFloor = self.extension.factor_floor
+    pid_log.appliedLatAccelFactor = self.extension.applied_lat_accel_factor
 
     measured_curvature = -VM.calc_curvature(math.radians(CS.steeringAngleDeg - params.angleOffsetDeg), CS.vEgo, params.roll)
     measurement = measured_curvature * CS.vEgo ** 2

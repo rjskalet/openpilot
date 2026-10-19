@@ -918,6 +918,9 @@ struct ControlsState @0x97ff69c53601abf1 {
     version @12 :Int32;
     liveLatAccelOffset @13 :Float32;
     appliedLatAccelOffset @14 :Float32;
+    liveLatAccelFactor @15 :Float32;
+    factorFloor @16 :Float32;
+    appliedLatAccelFactor @17 :Float32;
    }
 
   struct LateralAngleState {
