@@ -144,7 +144,7 @@ class TestSuburbanSpeedDependentTorque(OpenpilotTestCase):
     ext._suburban_factor_floor_scale = 1.0
     ext._tune_scale = 1.0
     ext.lac_torque = SimpleNamespace(
-      torque_params=SimpleNamespace(latAccelFactor=live_factor, latAccelOffset=-0.25, friction=0.18),
+      torque_params=SimpleNamespace(latAccelFactor=live_factor, latAccelOffset=-0.25, friction=float(np.float32(0.18))),
       update_limits=MagicMock(),
     )
     ext.steer_rail_schedule = None
