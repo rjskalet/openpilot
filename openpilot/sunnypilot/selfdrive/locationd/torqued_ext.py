@@ -25,6 +25,7 @@ DEFAULT_SPEED_BIN_CENTERS = [6.5, 10.0, 15.0, 21.0, 26.5, 32.0, 37.5]
 SUBURBAN_LIVE_TABLE_FINGERPRINT = "CHEVROLET_SUBURBAN_CAMERA_11TH_GEN"
 SUBURBAN_MAX_LEARNING_SPEED = 38.0
 MAZDA_CX9_FINGERPRINTS = {"MAZDA_CX9", "MAZDA_CX9_2021"}
+SUBURBAN_FACTOR_MAX_BP = [1.36, 1.36, 1.36, 1.20, 1.20, 1.30, 1.40]
 
 LIVE_TORQUE_PARAMETERS_SP_SERVICE = "customReserved19"
 LIVE_TORQUE_PARAMETERS_SP_KEY = "LiveTorqueParametersSP"
@@ -39,6 +40,19 @@ def get_speed_dep_cache_key(CP):
   if CP.carFingerprint in MAZDA_CX9_FINGERPRINTS:
     return LIVE_TORQUE_PARAMETERS_SP_MAZDA_KEY
   return LIVE_TORQUE_PARAMETERS_SP_KEY
+
+
+def get_speed_bin_factor_bounds(CP, ref_factors, factor_sanity):
+  bounds = [
+    ((1.0 - factor_sanity) * factor, (1.0 + factor_sanity) * factor)
+    for factor in ref_factors
+  ]
+  if CP.carFingerprint == SUBURBAN_LIVE_TABLE_FINGERPRINT and len(ref_factors) == len(SUBURBAN_FACTOR_MAX_BP):
+    # Keep the existing lower bounds so current cached learning remains valid, but stop
+    # the seed-centered sanity window from preventing the highway bins from ever learning
+    # factors near 1.0-1.4.
+    bounds = [(lo, SUBURBAN_FACTOR_MAX_BP[i]) for i, (lo, _) in enumerate(bounds)]
+  return bounds
 
 
 class TorqueEstimatorExt:
@@ -146,10 +160,7 @@ class TorqueEstimatorExt:
        'frictionCoefficient': FirstOrderFilter(ref_frictions[i], self.speed_bin_decays[i], DT_MDL)}
       for i in range(n_bins)
     ]
-    self.speed_bin_lat_accel_factor_bounds = [
-      ((1.0 - self.factor_sanity) * factor, (1.0 + self.factor_sanity) * factor)
-      for factor in ref_factors
-    ]
+    self.speed_bin_lat_accel_factor_bounds = get_speed_bin_factor_bounds(self.CP, ref_factors, self.factor_sanity)
     self.speed_bin_friction_bounds = [
       ((1.0 - self.friction_sanity) * friction, (1.0 + self.friction_sanity) * friction)
       for friction in ref_frictions
