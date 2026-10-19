@@ -140,6 +140,19 @@ class TestSpeedDependentTorqued(OpenpilotTestCase):
 
     ext.speed_bin_points[0].add_point.assert_not_called()
 
+  def test_suburban_keeps_first_bin_fixed_and_learns_second_bin(self):
+    ext = TorqueEstimatorExt.__new__(TorqueEstimatorExt)
+    ext.CP = car.CarParams(carFingerprint=SUBURBAN_LIVE_TABLE_FINGERPRINT)
+    ext.speed_binned = True
+    ext.speed_bin_bounds = [(5.0, 8.0), (8.0, 10.75)]
+    ext.speed_bin_points = [MagicMock(), MagicMock()]
+
+    ext._on_torque_point(0.4, 0.8, 7.9, SUBURBAN_MIN_YAW_LAT_ACCEL + 0.01)
+    ext._on_torque_point(0.4, 0.8, 9.5, SUBURBAN_MIN_YAW_LAT_ACCEL + 0.01)
+
+    ext.speed_bin_points[0].add_point.assert_not_called()
+    ext.speed_bin_points[1].add_point.assert_called_once_with(0.4, 0.8)
+
   def test_speed_bin_message_uses_registered_schema(self):
     ext = TorqueEstimatorExt.__new__(TorqueEstimatorExt)
     ext.speed_dep_seed_version = 3
