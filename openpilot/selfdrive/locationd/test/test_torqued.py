@@ -12,6 +12,9 @@ from openpilot.sunnypilot.selfdrive.locationd.torqued_ext import (LIVE_TORQUE_PA
                                                                  SUBURBAN_FACTOR_FLOOR_SCALE_MAX,
                                                                  SUBURBAN_FACTOR_MAX_BP,
                                                                  SUBURBAN_LIVE_TABLE_FINGERPRINT,
+                                                                 SUBURBAN_MAX_LEARNING_SPEED,
+                                                                 SUBURBAN_MIN_LEARNING_SPEED,
+                                                                 SUBURBAN_MIN_YAW_LAT_ACCEL,
                                                                  TorqueEstimatorExt)
 
 
@@ -105,6 +108,37 @@ class TestSpeedDependentTorqued:
     ext.speed_bin_points[0].add_point.assert_not_called()
     ext.speed_bin_points[1].add_point.assert_called_once_with(0.4, 0.8)
     ext.speed_bin_points[2].add_point.assert_not_called()
+
+  def test_suburban_speed_points_require_speed_and_yaw_excitation(self):
+    ext = TorqueEstimatorExt.__new__(TorqueEstimatorExt)
+    ext.CP = car.CarParams(carFingerprint=SUBURBAN_LIVE_TABLE_FINGERPRINT)
+    ext.speed_binned = True
+    ext.speed_bin_bounds = [(5.0, 18.0), (18.0, 24.0), (24.0, 29.0)]
+    ext.speed_bin_points = [MagicMock(), MagicMock(), MagicMock()]
+
+    ext._on_torque_point(0.4, 0.8, SUBURBAN_MIN_LEARNING_SPEED - 0.1, 0.2)
+    ext._on_torque_point(0.4, 0.8, 21.0, SUBURBAN_MIN_YAW_LAT_ACCEL - 0.001)
+    ext._on_torque_point(0.4, 0.8, SUBURBAN_MAX_LEARNING_SPEED + 0.1, 0.2)
+
+    for bucket in ext.speed_bin_points:
+      bucket.add_point.assert_not_called()
+
+    ext._on_torque_point(0.4, 0.8, 21.0, -(SUBURBAN_MIN_YAW_LAT_ACCEL + 0.001))
+
+    ext.speed_bin_points[0].add_point.assert_not_called()
+    ext.speed_bin_points[1].add_point.assert_called_once_with(0.4, 0.8)
+    ext.speed_bin_points[2].add_point.assert_not_called()
+
+  def test_suburban_speed_point_requires_explicit_yaw_excitation(self):
+    ext = TorqueEstimatorExt.__new__(TorqueEstimatorExt)
+    ext.CP = car.CarParams(carFingerprint=SUBURBAN_LIVE_TABLE_FINGERPRINT)
+    ext.speed_binned = True
+    ext.speed_bin_bounds = [(18.0, 24.0)]
+    ext.speed_bin_points = [MagicMock()]
+
+    ext._on_torque_point(0.4, 0.8, 21.0)
+
+    ext.speed_bin_points[0].add_point.assert_not_called()
 
   def test_speed_bin_message_uses_registered_schema(self):
     ext = TorqueEstimatorExt.__new__(TorqueEstimatorExt)
