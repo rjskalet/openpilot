@@ -209,11 +209,10 @@ class TestSuburbanSpeedDependentTorque(OpenpilotTestCase):
 
 class TestSuburbanTorqueControllerSelection:
   def test_current_suburban_tune_keeps_v1_controller(self):
-    controls_ext = SimpleNamespace(
-      _zoompilot_mazda=False,
-      CP=car.CarParams(brand="gm", carFingerprint=SUBURBAN_FINGERPRINT),
-      params=MagicMock(),
-    )
+    controls_ext = ControlsExt.__new__(ControlsExt)
+    controls_ext._zoompilot_mazda = False
+    controls_ext.CP = car.CarParams(brand="gm", carFingerprint=SUBURBAN_FINGERPRINT)
+    controls_ext.params = MagicMock()
     controls_ext.params.get_bool.return_value = True
     controls_ext.params.get.return_value = 2.0
     v1_controller = object()
