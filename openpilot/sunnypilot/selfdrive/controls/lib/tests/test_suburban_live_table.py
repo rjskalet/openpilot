@@ -79,9 +79,9 @@ class TestSuburbanLiveTable(OpenpilotTestCase):
 
   def test_learning_cutoff_and_expected_bin(self):
     estimator = configured_estimator()
-    estimator._on_torque_point(0.25, 0.1, 38.0)
+    estimator._on_torque_point(0.25, 0.1, 38.0, 0.08)
     assert len(estimator.speed_bin_points[-1]) == 1
-    estimator._on_torque_point(0.25, 0.1, 38.01)
+    estimator._on_torque_point(0.25, 0.1, 38.01, 0.08)
     assert len(estimator.speed_bin_points[-1]) == 1
     assert sum(len(bucket) for bucket in estimator.speed_bin_points) == 1
 
