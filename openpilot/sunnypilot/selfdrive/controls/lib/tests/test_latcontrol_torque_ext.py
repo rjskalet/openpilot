@@ -18,18 +18,19 @@ from opendbc.sunnypilot.car.interfaces import get_tune_scale
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.car.helpers import convert_to_capnp
-from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
-from openpilot.selfdrive.locationd.helpers import Pose
-from openpilot.common.mock.generators import generate_deviceMotion
-from openpilot.sunnypilot.selfdrive.car import interfaces as sunnypilot_interfaces
-from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_ext import LatControlTorqueExt
-from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_v0 import (
+from openpilot.selfdrive.controls.lib.latcontrol_torque import (
   INTERP_SPEEDS,
   KP_INTERP,
   SUBURBAN_KP_INTERP,
   SUBURBAN_KP_INTERP_SPEEDS,
+  LatControlTorque,
   get_kp_schedule,
 )
+from openpilot.selfdrive.locationd.helpers import Pose
+from openpilot.common.mock.generators import generate_deviceMotion
+from openpilot.sunnypilot.selfdrive.car import interfaces as sunnypilot_interfaces
+from openpilot.sunnypilot.selfdrive.controls.controlsd_ext import ControlsExt
+from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_ext import LatControlTorqueExt
 from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_ext_override import (
   LatControlTorqueExtOverride,
   SUBURBAN_FACTOR_FLOOR_BP,
@@ -204,6 +205,22 @@ class TestSuburbanSpeedDependentTorque(OpenpilotTestCase):
     assert ext.update_override_torque_params(ext.lac_torque.torque_params) is True
     assert np.isclose(ext.lac_torque.torque_params.latAccelFactor, np.float32(1.10))
     assert ext.lac_torque.torque_params.latAccelOffset == -0.25
+
+
+class TestSuburbanTorqueControllerSelection:
+  def test_current_suburban_tune_keeps_v1_controller(self):
+    controls_ext = SimpleNamespace(
+      _zoompilot_mazda=False,
+      CP=car.CarParams(brand="gm", carFingerprint=SUBURBAN_FINGERPRINT),
+      params=MagicMock(),
+    )
+    controls_ext.params.get_bool.return_value = True
+    controls_ext.params.get.return_value = 2.0
+    v1_controller = object()
+
+    selected = ControlsExt.initialize_lateral_control(controls_ext, v1_controller, None, DT_CTRL)
+
+    assert selected is v1_controller
 
 
 class TestSuburbanTorqueKpSchedule:
