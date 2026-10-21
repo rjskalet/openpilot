@@ -23,6 +23,13 @@ from openpilot.selfdrive.locationd.helpers import Pose
 from openpilot.common.mock.generators import generate_deviceMotion
 from openpilot.sunnypilot.selfdrive.car import interfaces as sunnypilot_interfaces
 from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_ext import LatControlTorqueExt
+from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_v0 import (
+  INTERP_SPEEDS,
+  KP_INTERP,
+  SUBURBAN_KP_INTERP,
+  SUBURBAN_KP_INTERP_SPEEDS,
+  get_kp_schedule,
+)
 from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_ext_override import (
   LatControlTorqueExtOverride,
   SUBURBAN_FACTOR_FLOOR_BP,
@@ -197,6 +204,38 @@ class TestSuburbanSpeedDependentTorque(OpenpilotTestCase):
     assert ext.update_override_torque_params(ext.lac_torque.torque_params) is True
     assert np.isclose(ext.lac_torque.torque_params.latAccelFactor, np.float32(1.10))
     assert ext.lac_torque.torque_params.latAccelOffset == -0.25
+
+
+class TestSuburbanTorqueKpSchedule:
+  def test_suburban_uses_progressive_low_mid_speed_kp(self):
+    cp = car.CarParams(carFingerprint=SUBURBAN_FINGERPRINT)
+
+    speeds, gains = get_kp_schedule(cp)
+
+    assert speeds == SUBURBAN_KP_INTERP_SPEEDS
+    assert gains == SUBURBAN_KP_INTERP
+    assert np.isclose(np.interp(5.0, speeds, gains), 10.0)
+    assert np.isclose(np.interp(10.0, speeds, gains), 2.8)
+    assert np.isclose(np.interp(15.0, speeds, gains), 1.7)
+    assert np.isclose(np.interp(20.0, speeds, gains), np.interp(20.0, INTERP_SPEEDS, KP_INTERP))
+
+  def test_suburban_schedule_only_reduces_kp_and_rejoins_stock_by_20_ms(self):
+    cp = car.CarParams(carFingerprint=SUBURBAN_FINGERPRINT)
+    speeds, gains = get_kp_schedule(cp)
+
+    sample_speeds = np.linspace(1.0, 30.0, 117)
+    suburban_gains = np.interp(sample_speeds, speeds, gains)
+    stock_gains = np.interp(sample_speeds, INTERP_SPEEDS, KP_INTERP)
+
+    assert np.all(suburban_gains <= stock_gains + 1e-12)
+    assert np.allclose(suburban_gains[sample_speeds >= 20.0], stock_gains[sample_speeds >= 20.0])
+
+  def test_mazda_and_other_cars_keep_stock_kp_schedule(self):
+    for fingerprint in (str(MAZDA.MAZDA_CX9), "HONDA CIVIC 2016"):
+      speeds, gains = get_kp_schedule(car.CarParams(carFingerprint=fingerprint))
+
+      assert speeds is INTERP_SPEEDS
+      assert gains is KP_INTERP
 
 
 class TestMazdaSpeedDependentTorque(OpenpilotTestCase):
