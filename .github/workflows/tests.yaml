@@ -25,6 +25,25 @@ env:
   GIT_CONFIG_VALUE_0: openpilot/selfdrive/modeld/models/big_driving_tinygrad.pkl
 
 jobs:
+  integrated_opendbc_vehicle_regressions:
+    name: integrated GM and Mazda car regressions
+    if: github.repository == 'rjskalet/openpilot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: true
+    - name: Verify and run donor-EPS and factory-ACC interface tests
+      working-directory: opendbc_repo
+      run: |
+        source setup.sh
+        python -m unittest \
+          opendbc.car.tests.test_car_interfaces.TestMazdaDonorEpsParams \
+          opendbc.car.gm.tests.test_suburban_camera_acc_clean_baseline.TestSuburbanCameraAccCleanBaseline \
+          opendbc.car.gm.tests.test_gm.TestGMSuburbanSteeringLoopback \
+          opendbc.sunnypilot.car.mazda.test_mazda
+
   integrated_opendbc_safety:
     name: integrated opendbc Panda safety
     if: github.repository == 'rjskalet/openpilot'
