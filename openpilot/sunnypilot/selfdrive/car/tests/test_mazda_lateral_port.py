@@ -235,8 +235,8 @@ class TestCX9PersistenceAndPlumbing:
       for key in ("LiveTorqueParametersSP", "LiveTorqueParametersSuburban", "LiveTorqueCarParamsSuburban"):
         assert params.get(key) is None
 
-  def test_shared_camera_offset_default(self):
-    assert Params().get_default_value("CameraOffset") == -0.08
+  def test_camera_offset_default_is_neutral(self):
+    assert Params().get_default_value("CameraOffset") == 0.0
 
   def test_speed_bin_service_and_schema_are_registered(self):
     assert LIVE_TORQUE_PARAMETERS_SP_KEY == "LiveTorqueParametersSP"

@@ -23,9 +23,8 @@ def _migrate_camera_offset(_params):
     if _params.get("CameraOffsetMigrated") == CAMERA_OFFSET_MIGRATION_VERSION:
       return
 
-    # This fork intentionally retains the shared -0.08 Mazda/Suburban default.
-    # Mark the upstream migration complete without rewriting either the default
-    # or a user's stored offset.
+    # CameraOffset has a neutral default. Mark the upstream migration complete
+    # without materializing the default or rewriting a user's stored offset.
     _params.put("CameraOffsetMigrated", CAMERA_OFFSET_MIGRATION_VERSION, block=True)
   except Exception as e:
     cloudlog.exception(f"Error migrating CameraOffset: {e}")
@@ -118,7 +117,7 @@ def _migrate_model_bundle_slots(_params):
 
 
 def run_migration(_params):
-  # Record the upstream camera-offset migration while preserving this fork's shared default.
+  # Record the upstream camera-offset migration without changing CameraOffset.
   _migrate_camera_offset(_params)
 
   # migrate OnroadScreenOffBrightness
