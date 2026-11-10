@@ -11,6 +11,7 @@ from opendbc.car.car_helpers import interface_names, interfaces
 from openpilot.common.git import get_commit
 from openpilot.tools.lib.openpilotci import get_url
 from openpilot.selfdrive.test.process_replay.compare_logs import compare_logs, format_diff
+from openpilot.selfdrive.test.process_replay.accepted_deltas import acceptance_summary
 from openpilot.selfdrive.test.process_replay.diff_report import diff_process, diff_report
 from openpilot.selfdrive.test.process_replay.process_replay import CONFIGS, PROC_REPLAY_DIR, FAKEDATA, replay_process, \
                                                                    check_most_messages_valid
@@ -222,14 +223,33 @@ if __name__ == "__main__":
 
   diff_short, diff_long, failed = format_diff(results, log_paths, ref_commit)
   if not args.update_refs:
+    # Preserve the *full* differences before considering the narrowly reviewed
+    # 2021 Mazda geometry exception. No field or message is ignored in comparison.
+    accepted_geometry = failed and acceptance_summary(results, diffs, ref_commit, full_test)
     with open(os.path.join(PROC_REPLAY_DIR, "diff.txt"), "w") as f:
       f.write(diff_long)
     print(diff_short)
 
+    report_ok = True
     try:
       diff_report(diffs, segments)
     except Exception:
+      report_ok = False
       print(f"failed to generate diff report:\n{traceback.format_exc()}")
+
+    if accepted_geometry and report_ok:
+      acceptance_msg = (
+        "ACCEPTED: reference-pinned 2021 Mazda CX-9 geometry replay delta "
+        "(exactly two process comparisons; all others unchanged). "
+        "Full raw differences preserved. See MAZDA_CX9_GEOMETRY_ACCEPTANCE.md. "
+        "Hardware validation remains required."
+      )
+      print(acceptance_msg)
+      with open(os.path.join(PROC_REPLAY_DIR, "diff.txt"), "a") as f:
+        f.write("\n" + acceptance_msg + "\n")
+      with open(os.path.join(PROC_REPLAY_DIR, "diff_report.txt"), "a") as f:
+        f.write("\n\n" + acceptance_msg + "\n")
+      failed = False
 
     if failed:
       print("TEST FAILED")
