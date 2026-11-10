@@ -25,6 +25,41 @@ env:
   GIT_CONFIG_VALUE_0: openpilot/selfdrive/modeld/models/big_driving_tinygrad.pkl
 
 jobs:
+  integrated_opendbc_safety:
+    name: integrated opendbc Panda safety
+    if: github.repository == 'rjskalet/openpilot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: true
+    - name: Verify checked-out safety submodule matches PR gitlink
+      run: |
+        expected="$(git ls-tree HEAD opendbc_repo | awk '{print $3}')"
+        actual="$(git -C opendbc_repo rev-parse HEAD)"
+        echo "opendbc SHA: $actual"
+        test -n "$expected"
+        test "$actual" = "$expected"
+    - name: Run integrated Panda safety tests and coverage
+      working-directory: opendbc_repo
+      run: ./opendbc/safety/tests/test.sh
+
+  integrated_opendbc_mutation:
+    name: integrated opendbc safety mutation
+    if: github.repository == 'rjskalet/openpilot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: true
+    - name: Run integrated Panda mutation tests
+      working-directory: opendbc_repo
+      run: |
+        source setup.sh
+        python opendbc/safety/tests/mutation.py
+
   build_release:
     name: build release
     runs-on: ${{
