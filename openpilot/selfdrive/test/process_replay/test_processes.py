@@ -238,12 +238,12 @@ if __name__ == "__main__":
       print(f"failed to generate diff report:\n{traceback.format_exc()}")
 
     if accepted_geometry and report_ok:
-      acceptance_msg = (
-        "ACCEPTED: reference-pinned 2021 Mazda CX-9 geometry replay delta "
-        "(exactly two process comparisons; all others unchanged). "
-        "Full raw differences preserved. See MAZDA_CX9_GEOMETRY_ACCEPTANCE.md. "
-        "Hardware validation remains required."
-      )
+      acceptance_msg = " ".join([
+        "ACCEPTED: reference-pinned 2021 Mazda CX-9 geometry replay delta",
+        "(exactly two process comparisons; all others unchanged).",
+        "Full raw differences preserved. See MAZDA_CX9_GEOMETRY_ACCEPTANCE.md.",
+        "Hardware validation remains required.",
+      ])
       print(acceptance_msg)
       with open(os.path.join(PROC_REPLAY_DIR, "diff.txt"), "a") as f:
         f.write("\n" + acceptance_msg + "\n")

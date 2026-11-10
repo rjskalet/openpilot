@@ -46,7 +46,7 @@ class TestMazdaReplayAcceptance(unittest.TestCase):
       MAZDA_ROUTE, "card", REFERENCE_COMMIT, self.card, self.card_details))
 
   def test_complete_pass_requires_exactly_two_known_pairs(self):
-    results = {MAZDA_ROUTE: {"card": self.card, "controlsd": self.control}, "GM": {"controlsd": []}}
+    results: dict[str, dict[str, object]] = {MAZDA_ROUTE: {"card": self.card, "controlsd": self.control}, "GM": {"controlsd": []}}
     data = [(MAZDA_ROUTE, "card", self.card_details),
             (MAZDA_ROUTE, "controlsd", self.control_details)]
     self.assertTrue(acceptance_summary(results, data, REFERENCE_COMMIT, True))
@@ -68,11 +68,11 @@ class TestMazdaReplayAcceptance(unittest.TestCase):
 
   def test_reject_unbounded_actuator_torque(self):
     raw, data = deepcopy(self.control), deepcopy(self.control_details)
-    for i, (kind, field, pair) in enumerate(raw):
+    for i, (kind, field, _pair) in enumerate(raw):
       if field == TORQUE_FIELDS[0]:
         raw[i] = (kind, field, (0.4, 0.5))
         break
-    for i, (field, frame, pair, ts) in enumerate(data[0]):
+    for i, (field, frame, _pair, ts) in enumerate(data[0]):
       if field == TORQUE_FIELDS[0]:
         data[0][i] = (field, frame, (0.4, 0.5), ts)
         break
@@ -86,7 +86,7 @@ class TestMazdaReplayAcceptance(unittest.TestCase):
 
   def test_reject_saturation_shift_outside_single_frame_window(self):
     raw, data = deepcopy(self.control), deepcopy(self.control_details)
-    for i, (field, frame, pair, ts) in enumerate(data[0]):
+    for i, (field, _frame, pair, ts) in enumerate(data[0]):
       if field == CONTROLLER + "saturated":
         data[0][i] = (field, 1500, pair, ts)
         break
