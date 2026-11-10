@@ -27,6 +27,9 @@ KI = 0.15
 
 INTERP_SPEEDS = [1, 1.5, 2.0, 3.0, 5, 7.5, 10, 15, 30]
 KP_INTERP = [250, 120, 65, 30, 11.5, 5.5, 3.5, 2.0, KP]
+SUBURBAN_FINGERPRINT = "CHEVROLET_SUBURBAN_CAMERA_11TH_GEN"
+SUBURBAN_KP_INTERP_SPEEDS = [1, 1.5, 2.0, 3.0, 5, 7.5, 10, 15, 20, 30]
+SUBURBAN_KP_INTERP = [250, 120, 65, 30, 10.0, 4.5, 2.8, 1.7, 1.6, KP]
 
 LP_FILTER_CUTOFF_HZ = 1.2
 JERK_LOOKAHEAD_SECONDS = 0.19
@@ -34,13 +37,21 @@ JERK_GAIN = 0.3
 LAT_ACCEL_REQUEST_BUFFER_SECONDS = 1.0
 VERSION = 1
 
+
+def get_kp_schedule(CP):
+  if CP.carFingerprint == SUBURBAN_FINGERPRINT:
+    return SUBURBAN_KP_INTERP_SPEEDS, SUBURBAN_KP_INTERP
+  return INTERP_SPEEDS, KP_INTERP
+
+
 class LatControlTorque(LatControl):
   def __init__(self, CP, CP_SP, CI, dt):
     super().__init__(CP, CP_SP, CI, dt)
     self.torque_params = CP.lateralTuning.torque.as_builder()
     self.torque_from_lateral_accel = CI.torque_from_lateral_accel()
     self.lateral_accel_from_torque = CI.lateral_accel_from_torque()
-    self.pid = PIDController([INTERP_SPEEDS, KP_INTERP], KI, rate=1/self.dt)
+    kp_speeds, kp_values = get_kp_schedule(CP)
+    self.pid = PIDController([kp_speeds, kp_values], KI, rate=1/self.dt)
     self.update_limits()
     self.steering_angle_deadzone_deg = self.torque_params.steeringAngleDeadzoneDeg
     self.lat_accel_request_buffer_len = int(LAT_ACCEL_REQUEST_BUFFER_SECONDS / self.dt)

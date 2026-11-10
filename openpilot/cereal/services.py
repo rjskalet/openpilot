@@ -28,7 +28,7 @@ _services: dict[str, tuple] = {
   "chestnutState": (True, 10., 1),
   "chestnutGpuState": (False, 10.),
   "touch": (True, 20., 1),
-  "can": (True, 100., 2053, QueueSize.BIG),  # decimation gives ~3 msgs in a full segment
+  "can": (True, 100., 2053, QueueSize.BIG),
   "controlsState": (True, 100., 10, QueueSize.MEDIUM),
   "selfdriveState": (True, 100., 10),
   "pandaStates": (True, 10., 1),
@@ -94,7 +94,7 @@ _services: dict[str, tuple] = {
   "carControlSP": (True, 100., 10),
   "carStateSP": (True, 100., 10),
   "liveMapDataSP": (True, 1., 1),
-  "modelDataV2SP": (True, 20., 10, QueueSize.BIG),
+  "modelDataV2SP": (True, 20., None, QueueSize.BIG),
   "liveLocationKalman": (True, 20.),
 
   # debug
@@ -108,6 +108,7 @@ _services: dict[str, tuple] = {
   "livestreamNarrowRoadEncodeData": (False, 20., None, QueueSize.MEDIUM),
   "livestreamCabinEncodeData": (False, 20., None, QueueSize.MEDIUM),
   "customReservedRawData0": (True, 0.),
+  "customReserved19": (True, 4., 1),
 }
 SERVICE_LIST = {name: Service(*vals) for
                 idx, (name, vals) in enumerate(_services.items())}

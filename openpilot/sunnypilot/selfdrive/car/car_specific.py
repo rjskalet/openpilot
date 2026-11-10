@@ -9,6 +9,7 @@ from openpilot.cereal import log, custom
 from opendbc.car import structs
 
 from opendbc.car.chrysler.values import RAM_DT
+from opendbc.car.mazda.values import MazdaFlags
 from openpilot.selfdrive.selfdrived.events import Events
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
 
@@ -47,5 +48,12 @@ class CarSpecificEventsSP:
         if CS.cruiseState.standstill and not CS.brakePressed and self.CP_SP.enableGasInterceptor:
           if events.has(EventName.resumeRequired):
             events.remove(EventName.resumeRequired)
+
+    elif self.CP.brand == 'mazda':
+      if self.CP.flags & MazdaFlags.STEER_TO_ZERO_EPS and events.has(EventName.steerTempUnavailable):
+        # The donor-EPS non-delivery latch has already zeroed the steering command. Keep the
+        # driver warning, but do not escalate an already-protected dropout into a soft disable.
+        events.remove(EventName.steerTempUnavailable)
+        events.add(EventName.steerTempUnavailableSilent)
 
     return events_sp

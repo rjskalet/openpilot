@@ -468,13 +468,6 @@ struct ModelDataV2SP @0xa1680744031fdb2d {
   laneTurnDirection @0 :TurnDirection;
   leftLaneChangeEdgeBlock @1 :Bool;
   rightLaneChangeEdgeBlock @2 :Bool;
-  blendfulCurvature @3 :Float32;
-  blendfulTrust @4 :Float32;
-  modelCurvature @5 :Float32;
-  blendfulGoingAround @6 :Bool;
-  blendfulLeftProb @7 :Float32;
-  blendfulRightProb @8 :Float32;
-  blendfulLaneWidth @9 :Float32;
 
   enum TurnDirection {
     none @0;
@@ -511,4 +504,11 @@ struct CustomReserved18 @0xc86a3d38d13eb3ef {
 }
 
 struct CustomReserved19 @0xa4f1eb3323f5f582 {
+  version @0 :Int32;
+  speedBinCenters @1 :List(Float32);
+  speedBinLatAccelFactors @2 :List(Float32);
+  speedBinFrictions @3 :List(Float32);
+  speedBinValid @4 :List(Bool);
+  speedBinPoints @5 :List(List(List(Float32)));
+  seedVersion @6 :Int32;
 }
