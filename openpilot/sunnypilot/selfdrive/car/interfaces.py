@@ -22,13 +22,6 @@ MAZDA_STEER_TO_ZERO_TORQUE_TUNE = 2.0
 SUBURBAN_LIVE_TABLE_FINGERPRINT = "CHEVROLET_SUBURBAN_CAMERA_11TH_GEN"
 
 
-def log_fingerprint(CP: structs.CarParams) -> None:
-  if CP.carFingerprint == "MOCK":
-    sentry.capture_fingerprint_mock()
-  else:
-    sentry.capture_fingerprint(CP.carFingerprint, CP.brand)
-
-
 def _seed_mazda_torque_defaults(CP: structs.CarParams, params: Params | None = None) -> None:
   if params is None:
     params = Params()
