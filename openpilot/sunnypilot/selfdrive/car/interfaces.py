@@ -15,20 +15,11 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.sunnypilot.selfdrive.controls.lib.nnlc.helpers import get_nn_model_path
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.helpers import set_speed_limit_assist_availability
 
-import openpilot.system.sentry as sentry
-
 from openpilot.sunnypilot.sunnylink.statsd import STATSLOGSP
 
 
 MAZDA_STEER_TO_ZERO_TORQUE_TUNE = 2.0
 SUBURBAN_LIVE_TABLE_FINGERPRINT = "CHEVROLET_SUBURBAN_CAMERA_11TH_GEN"
-
-
-def log_fingerprint(CP: structs.CarParams) -> None:
-  if CP.carFingerprint == "MOCK":
-    sentry.capture_fingerprint_mock()
-  else:
-    sentry.capture_fingerprint(CP.carFingerprint, CP.brand)
 
 
 def _seed_mazda_torque_defaults(CP: structs.CarParams, params: Params | None = None) -> None:
@@ -82,7 +73,6 @@ def seed_car_defaults_offroad(params: Params) -> None:
     return
   _seed_mazda_torque_defaults(CP, params)
   _seed_suburban_live_table_defaults(CP, params)
-
 
 def _enforce_torque_lateral_control(CP: structs.CarParams, params: Params | None = None, enabled: bool = False) -> bool:
   if params is None:
@@ -154,7 +144,6 @@ def _cleanup_unsupported_params(CP: structs.CarParams, CP_SP: structs.CarParamsS
 
   if not CP.openpilotLongitudinalControl and CP_SP.pcmCruiseSpeed:
     cloudlog.warning("openpilot Longitudinal Control and ICBM not available, cleaning up params")
-    params.remove("DynamicExperimentalControl")
     params.remove("CustomAccIncrementsEnabled")
     params.remove("SmartCruiseControlVision")
     params.remove("SmartCruiseControlMap")

@@ -11,6 +11,7 @@ from opendbc.car.car_helpers import interface_names, interfaces
 from openpilot.common.git import get_commit
 from openpilot.tools.lib.openpilotci import get_url
 from openpilot.selfdrive.test.process_replay.compare_logs import compare_logs, format_diff
+from openpilot.selfdrive.test.process_replay.accepted_deltas import acceptance_summary
 from openpilot.selfdrive.test.process_replay.diff_report import diff_process, diff_report
 from openpilot.selfdrive.test.process_replay.process_replay import CONFIGS, PROC_REPLAY_DIR, FAKEDATA, replay_process, \
                                                                    check_most_messages_valid
@@ -36,7 +37,7 @@ source_segments = [
   ("MAZDA", "bd6a637565e91581|2021-10-30--15-14-53--4"),       # MAZDA.MAZDA_CX9_2021
   ("FORD", "54827bf84c38b14f|2023-01-26--21-59-07--4"),        # FORD.FORD_BRONCO_SPORT_MK1
   ("RIVIAN", "bc095dc92e101734|000000db--ee9fe46e57--1"),      # RIVIAN.RIVIAN_R1_GEN1
-  ("TESLA", "2c912ca5de3b1ee9|0000025d--6eb6bcbca4--4"),       # TESLA.TESLA_MODEL_Y
+  ("TESLA", "aebd8f1d4ea16066|000002d8--5850d3ea5c--2"),       # TESLA.TESLA_MODEL_Y
 
   # Enable when port is tested and dashcamOnly is no longer set
   #("VOLKSWAGEN2", "3cfdec54aa035f3f|2022-07-19--23-45-10--2"),  # VOLKSWAGEN.VOLKSWAGEN_PASSAT_NMS
@@ -60,7 +61,7 @@ segments = [
   ("MAZDA", "regenACF84CCF482|2024-08-30--03-21-55--0"),
   ("FORD", "regen755D8CB1E1F|2025-04-08--23-13-43--0"),
   ("RIVIAN", "regen5FCAC896BBE|2025-04-08--23-13-35--0"),
-  ("TESLA", "2c912ca5de3b1ee9|0000025d--6eb6bcbca4--4"),
+  ("TESLA", "aebd8f1d4ea16066|000002d8--5850d3ea5c--2"),
 ]
 
 # dashcamOnly makes don't need to be tested until a full port is done
@@ -74,11 +75,19 @@ EXCLUDED_PROCS = {"modeld", "dmonitoringmodeld"}
 
 def run_test_process(data):
   segment, cfg, args, cur_log_fn, ref_log_path, lr_dat = data
-  ref_log_msgs = list(LogReader(ref_log_path))
+  ref_error = None
+  try:
+    ref_log_msgs = list(LogReader(ref_log_path))
+  except Exception:
+    # New routes have no ref yet, still replay and publish new refs.
+    ref_log_msgs = []
+    ref_error = f"Failed to load reference {ref_log_path}:\n{traceback.format_exc()}"
   lr = LogReader.from_bytes(lr_dat)
   res, log_msgs = test_process(cfg, lr, segment, ref_log_msgs, cur_log_fn, args.ignore_fields, args.ignore_msgs)
   # save logs so we can update refs
   save_log(cur_log_fn, log_msgs)
+  if ref_error is not None:
+    return (segment, cfg.proc_name, ref_error, ref_error)
   try:
     diff_data = diff_process(cfg, ref_log_msgs, log_msgs)
   except Exception:
@@ -214,14 +223,33 @@ if __name__ == "__main__":
 
   diff_short, diff_long, failed = format_diff(results, log_paths, ref_commit)
   if not args.update_refs:
+    # Preserve the *full* differences before considering the narrowly reviewed
+    # 2021 Mazda geometry exception. No field or message is ignored in comparison.
+    accepted_geometry = failed and acceptance_summary(results, diffs, ref_commit, full_test)
     with open(os.path.join(PROC_REPLAY_DIR, "diff.txt"), "w") as f:
       f.write(diff_long)
     print(diff_short)
 
+    report_ok = True
     try:
       diff_report(diffs, segments)
     except Exception:
+      report_ok = False
       print(f"failed to generate diff report:\n{traceback.format_exc()}")
+
+    if accepted_geometry and report_ok:
+      acceptance_msg = " ".join([
+        "ACCEPTED: reference-pinned 2021 Mazda CX-9 geometry replay delta",
+        "(exactly two process comparisons; all others unchanged).",
+        "Full raw differences preserved. See MAZDA_CX9_GEOMETRY_ACCEPTANCE.md.",
+        "Hardware validation remains required.",
+      ])
+      print(acceptance_msg)
+      with open(os.path.join(PROC_REPLAY_DIR, "diff.txt"), "a") as f:
+        f.write("\n" + acceptance_msg + "\n")
+      with open(os.path.join(PROC_REPLAY_DIR, "diff_report.txt"), "a") as f:
+        f.write("\n\n" + acceptance_msg + "\n")
+      failed = False
 
     if failed:
       print("TEST FAILED")

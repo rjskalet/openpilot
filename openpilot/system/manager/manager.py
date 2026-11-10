@@ -8,7 +8,6 @@ import traceback
 
 from openpilot.cereal import log
 import openpilot.cereal.messaging as messaging
-import openpilot.system.sentry as sentry
 from openpilot.common.utils import atomic_write
 from openpilot.common.params import Params, ParamKeyFlag
 from openpilot.common.text_window import TextWindow
@@ -96,7 +95,6 @@ def manager_init() -> None:
   if not build_metadata.openpilot.is_dirty:
     os.environ['CLEAN'] = '1'
 
-  sentry.init(sentry.SentryProject.SELFDRIVE)
   cloudlog.bind_global(dongle_id=dongle_id,
                        version=build_metadata.openpilot.version,
                        origin=build_metadata.openpilot.git_normalized_origin,
@@ -199,7 +197,7 @@ def main() -> None:
     manager_thread()
   except Exception:
     traceback.print_exc()
-    sentry.capture_exception()
+    cloudlog.exception("crash")
   finally:
     manager_cleanup()
 

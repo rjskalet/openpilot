@@ -23,7 +23,12 @@ ALLOWED_CARS = ['toyota', 'hyundai', 'rivian', 'honda']
 DEFAULT_SPEED_BIN_BOUNDS = [(5, 8), (8, 12), (12, 18), (18, 24), (24, 29), (29, 35), (35, 40)]
 DEFAULT_SPEED_BIN_CENTERS = [6.5, 10.0, 15.0, 21.0, 26.5, 32.0, 37.5]
 SUBURBAN_LIVE_TABLE_FINGERPRINT = "CHEVROLET_SUBURBAN_CAMERA_11TH_GEN"
+SUBURBAN_MIN_LEARNING_SPEED = 8.0
+SUBURBAN_MIN_YAW_LAT_ACCEL = 0.07
 SUBURBAN_MAX_LEARNING_SPEED = 38.0
+SUBURBAN_FACTOR_MAX_BP = [1.360, 1.360, 1.360, 1.200, 1.200, 1.300, 1.400]
+SUBURBAN_FACTOR_FLOOR_SCALE_MIN = 0.90
+SUBURBAN_FACTOR_FLOOR_SCALE_MAX = 1.15
 MAZDA_CX9_FINGERPRINTS = {"MAZDA_CX9", "MAZDA_CX9_2021"}
 
 LIVE_TORQUE_PARAMETERS_SP_SERVICE = "customReserved19"
@@ -153,13 +158,19 @@ class TorqueEstimatorExt:
     ]
 
   def _get_speed_bin_lat_accel_factor_bounds(self, ref_factors):
-    suburban_floor_scale = None
-    if self.CP.carFingerprint == SUBURBAN_LIVE_TABLE_FINGERPRINT:
-      suburban_floor_scale = float(self._params.get("SuburbanFactorFloorScale", return_default=True))
+    if (self.CP.carFingerprint == SUBURBAN_LIVE_TABLE_FINGERPRINT
+        and len(ref_factors) == len(SUBURBAN_FACTOR_MAX_BP)):
+      scale = float(self._params.get("SuburbanFactorFloorScale", return_default=True))
+      if not np.isfinite(scale):
+        scale = 1.0
+      scale = float(np.clip(scale, SUBURBAN_FACTOR_FLOOR_SCALE_MIN, SUBURBAN_FACTOR_FLOOR_SCALE_MAX))
+      return [
+        (factor * scale, max((1.0 + self.factor_sanity) * factor, SUBURBAN_FACTOR_MAX_BP[i]))
+        for i, factor in enumerate(ref_factors)
+      ]
 
     return [
-      (factor * suburban_floor_scale if suburban_floor_scale is not None else (1.0 - self.factor_sanity) * factor,
-       (1.0 + self.factor_sanity) * factor)
+      ((1.0 - self.factor_sanity) * factor, (1.0 + self.factor_sanity) * factor)
       for factor in ref_factors
     ]
 
@@ -171,11 +182,19 @@ class TorqueEstimatorExt:
                          points_per_bucket=POINTS_PER_BUCKET,
                          rowsize=3)
 
-  def _on_torque_point(self, steer, lateral_acc, vego):
+  def _on_torque_point(self, steer, lateral_acc, vego, yaw_lat_accel=None):
     if not self.speed_binned:
       return
-    if self.CP.carFingerprint == SUBURBAN_LIVE_TABLE_FINGERPRINT and vego > SUBURBAN_MAX_LEARNING_SPEED:
-      return
+    if self.CP.carFingerprint == SUBURBAN_LIVE_TABLE_FINGERPRINT:
+      # The Suburban's near-straight corrections materially flatten the speed-bin fit.
+      # Keep the lowest 6.5 m/s bin fixed, but allow learning from the 9.5 m/s bin upward
+      # when the vehicle is producing measurable yaw response. Use pre-roll v*yaw_rate
+      # for the gate so road/body roll cannot create false excitation. Other vehicles
+      # retain the existing point-acceptance behavior.
+      if vego < SUBURBAN_MIN_LEARNING_SPEED or vego > SUBURBAN_MAX_LEARNING_SPEED:
+        return
+      if yaw_lat_accel is None or abs(yaw_lat_accel) < SUBURBAN_MIN_YAW_LAT_ACCEL:
+        return
     for i, (lo, hi) in enumerate(self.speed_bin_bounds):
       if lo <= vego < hi:
         self.speed_bin_points[i].add_point(steer, lateral_acc)

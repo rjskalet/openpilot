@@ -31,7 +31,7 @@ The CX-9 configuration is a 2018 Mazda CX-9 with a newer CX-5 donor EPS. Preserv
 - Speed-dependent torque learning.
 - Torque-cache persistence and restoration.
 - Mazda-specific lateral tuning.
-- The shared `CameraOffset` default of `-0.08`.
+- The user-adjustable `CameraOffset` feature with a neutral `0.0` default.
 - Suburban torque-cache parameters intentionally shared across branches.
 
 ## Steering and CAN safety constraints

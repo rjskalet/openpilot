@@ -9,7 +9,12 @@ from openpilot.common.test import OpenpilotTestCase
 from openpilot.selfdrive.locationd.torqued import TorqueEstimator, VERSION
 from openpilot.sunnypilot.selfdrive.locationd.torqued_ext import (LIVE_TORQUE_PARAMETERS_SP_KEY,
                                                                  LIVE_TORQUE_PARAMETERS_SP_SERVICE,
+                                                                 SUBURBAN_FACTOR_FLOOR_SCALE_MAX,
+                                                                 SUBURBAN_FACTOR_MAX_BP,
                                                                  SUBURBAN_LIVE_TABLE_FINGERPRINT,
+                                                                 SUBURBAN_MAX_LEARNING_SPEED,
+                                                                 SUBURBAN_MIN_LEARNING_SPEED,
+                                                                 SUBURBAN_MIN_YAW_LAT_ACCEL,
                                                                  TorqueEstimatorExt)
 
 
@@ -37,14 +42,14 @@ class TestTorqued(OpenpilotTestCase):
     assert msg.lateralTorqueParameters.calPerc == 100
 
 
-class TestSpeedDependentTorqued:
+class TestSpeedDependentTorqued(OpenpilotTestCase):
   def test_suburban_factor_floor_param_default_and_type(self):
     params = Params()
 
     assert params.get_default_value("SuburbanFactorFloorScale") == 1.0
     assert params.get_type("SuburbanFactorFloorScale") == ParamKeyType.FLOAT
 
-  def test_suburban_default_factor_floor_uses_seed_values(self):
+  def test_suburban_learner_keeps_seed_floor_with_u_headroom(self):
     ext = TorqueEstimatorExt.__new__(TorqueEstimatorExt)
     ext.CP = car.CarParams(carFingerprint=SUBURBAN_LIVE_TABLE_FINGERPRINT)
     ext._params = MagicMock()
@@ -57,8 +62,24 @@ class TestSpeedDependentTorqued:
     assert all(math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-12)
                for actual, expected in zip([lower for lower, _ in bounds], seed_factors, strict=True))
     assert all(math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-12)
-               for actual, expected in zip([upper for _, upper in bounds], [factor * 2.0 for factor in seed_factors], strict=True))
+               for actual, expected in zip([upper for _, upper in bounds], SUBURBAN_FACTOR_MAX_BP, strict=True))
     ext._params.get.assert_called_once_with("SuburbanFactorFloorScale", return_default=True)
+
+  def test_suburban_learner_floor_scale_is_clamped(self):
+    ext = TorqueEstimatorExt.__new__(TorqueEstimatorExt)
+    ext.CP = car.CarParams(carFingerprint=SUBURBAN_LIVE_TABLE_FINGERPRINT)
+    ext._params = MagicMock()
+    ext._params.get.return_value = b"9.0"
+    ext.factor_sanity = 1.0
+    seed_factors = [0.680, 0.680, 0.680, 0.435, 0.469, 0.378, 0.413]
+
+    bounds = ext._get_speed_bin_lat_accel_factor_bounds(seed_factors)
+
+    expected_floor = [factor * SUBURBAN_FACTOR_FLOOR_SCALE_MAX for factor in seed_factors]
+    assert all(math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-12)
+               for actual, expected in zip([lower for lower, _ in bounds], expected_floor, strict=True))
+    assert all(math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-12)
+               for actual, expected in zip([upper for _, upper in bounds], SUBURBAN_FACTOR_MAX_BP, strict=True))
 
   def test_non_suburban_factor_bounds_remain_symmetric(self):
     ext = TorqueEstimatorExt.__new__(TorqueEstimatorExt)
@@ -87,6 +108,50 @@ class TestSpeedDependentTorqued:
     ext.speed_bin_points[0].add_point.assert_not_called()
     ext.speed_bin_points[1].add_point.assert_called_once_with(0.4, 0.8)
     ext.speed_bin_points[2].add_point.assert_not_called()
+
+  def test_suburban_speed_points_require_speed_and_yaw_excitation(self):
+    ext = TorqueEstimatorExt.__new__(TorqueEstimatorExt)
+    ext.CP = car.CarParams(carFingerprint=SUBURBAN_LIVE_TABLE_FINGERPRINT)
+    ext.speed_binned = True
+    ext.speed_bin_bounds = [(5.0, 18.0), (18.0, 24.0), (24.0, 29.0)]
+    ext.speed_bin_points = [MagicMock(), MagicMock(), MagicMock()]
+
+    ext._on_torque_point(0.4, 0.8, SUBURBAN_MIN_LEARNING_SPEED - 0.1, 0.2)
+    ext._on_torque_point(0.4, 0.8, 21.0, SUBURBAN_MIN_YAW_LAT_ACCEL - 0.001)
+    ext._on_torque_point(0.4, 0.8, SUBURBAN_MAX_LEARNING_SPEED + 0.1, 0.2)
+
+    for bucket in ext.speed_bin_points:
+      bucket.add_point.assert_not_called()
+
+    ext._on_torque_point(0.4, 0.8, 21.0, -(SUBURBAN_MIN_YAW_LAT_ACCEL + 0.001))
+
+    ext.speed_bin_points[0].add_point.assert_not_called()
+    ext.speed_bin_points[1].add_point.assert_called_once_with(0.4, 0.8)
+    ext.speed_bin_points[2].add_point.assert_not_called()
+
+  def test_suburban_speed_point_requires_explicit_yaw_excitation(self):
+    ext = TorqueEstimatorExt.__new__(TorqueEstimatorExt)
+    ext.CP = car.CarParams(carFingerprint=SUBURBAN_LIVE_TABLE_FINGERPRINT)
+    ext.speed_binned = True
+    ext.speed_bin_bounds = [(18.0, 24.0)]
+    ext.speed_bin_points = [MagicMock()]
+
+    ext._on_torque_point(0.4, 0.8, 21.0)
+
+    ext.speed_bin_points[0].add_point.assert_not_called()
+
+  def test_suburban_keeps_first_bin_fixed_and_learns_second_bin(self):
+    ext = TorqueEstimatorExt.__new__(TorqueEstimatorExt)
+    ext.CP = car.CarParams(carFingerprint=SUBURBAN_LIVE_TABLE_FINGERPRINT)
+    ext.speed_binned = True
+    ext.speed_bin_bounds = [(5.0, 8.0), (8.0, 10.75)]
+    ext.speed_bin_points = [MagicMock(), MagicMock()]
+
+    ext._on_torque_point(0.4, 0.8, 7.9, SUBURBAN_MIN_YAW_LAT_ACCEL + 0.01)
+    ext._on_torque_point(0.4, 0.8, 9.5, SUBURBAN_MIN_YAW_LAT_ACCEL + 0.01)
+
+    ext.speed_bin_points[0].add_point.assert_not_called()
+    ext.speed_bin_points[1].add_point.assert_called_once_with(0.4, 0.8)
 
   def test_speed_bin_message_uses_registered_schema(self):
     ext = TorqueEstimatorExt.__new__(TorqueEstimatorExt)

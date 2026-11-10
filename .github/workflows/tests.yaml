@@ -22,9 +22,63 @@ env:
   PYTHONPATH: ${{ github.workspace }}
   GIT_CONFIG_COUNT: 1
   GIT_CONFIG_KEY_0: lfs.fetchexclude
-  GIT_CONFIG_VALUE_0: openpilot/selfdrive/modeld/models/big_driving_supercombo.onnx
+  GIT_CONFIG_VALUE_0: openpilot/selfdrive/modeld/models/big_driving_tinygrad.pkl
 
 jobs:
+  integrated_opendbc_vehicle_regressions:
+    name: integrated GM and Mazda car regressions
+    if: github.repository == 'rjskalet/openpilot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: true
+    - name: Verify and run donor-EPS and factory-ACC interface tests
+      working-directory: opendbc_repo
+      run: |
+        source setup.sh
+        python -m unittest \
+          opendbc.car.tests.test_car_interfaces.TestMazdaDonorEpsParams \
+          opendbc.car.gm.tests.test_suburban_camera_acc_clean_baseline.TestSuburbanCameraAccCleanBaseline \
+          opendbc.car.gm.tests.test_gm.TestGMSuburbanSteeringLoopback \
+          opendbc.sunnypilot.car.mazda.test_mazda
+
+  integrated_opendbc_safety:
+    name: integrated opendbc Panda safety
+    if: github.repository == 'rjskalet/openpilot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: true
+    - name: Verify checked-out safety submodule matches PR gitlink
+      run: |
+        expected="$(git ls-tree HEAD opendbc_repo | awk '{print $3}')"
+        actual="$(git -C opendbc_repo rev-parse HEAD)"
+        echo "opendbc SHA: $actual"
+        test -n "$expected"
+        test "$actual" = "$expected"
+    - name: Run integrated Panda safety tests and coverage
+      working-directory: opendbc_repo
+      run: ./opendbc/safety/tests/test.sh
+
+  integrated_opendbc_mutation:
+    name: integrated opendbc safety mutation
+    if: github.repository == 'rjskalet/openpilot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: true
+    - name: Run integrated Panda mutation tests
+      working-directory: opendbc_repo
+      run: |
+        source setup.sh
+        python opendbc/safety/tests/mutation.py
+
   build_release:
     name: build release
     runs-on: ${{
@@ -50,6 +104,12 @@ jobs:
       timeout-minutes: 3
       run: TARGET_DIR=$STRIPPED_DIR tools/release/build_stripped.sh
     - run: ./tools/op.sh setup
+    - name: Restore scons cache
+      uses: actions/cache@v6
+      with:
+        path: /tmp/scons_cache
+        key: scons-${{ runner.os }}-${{ github.job }}-${{ github.sha }}
+        restore-keys: scons-${{ runner.os }}-${{ github.job }}-
     - name: Build openpilot and run checks
       timeout-minutes: 30
       working-directory: ${{ env.STRIPPED_DIR }}
@@ -89,6 +149,12 @@ jobs:
         FILTERED=$(echo "$PATH" | tr ':' '\n' | grep -v '/opt/homebrew' | tr '\n' ':')
         echo "PATH=${FILTERED}/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" >> $GITHUB_ENV
     - run: ./tools/op.sh setup
+    - name: Restore scons cache
+      uses: actions/cache@v6
+      with:
+        path: /tmp/scons_cache
+        key: scons-${{ runner.os }}-${{ github.job }}-${{ github.sha }}
+        restore-keys: scons-${{ runner.os }}-${{ github.job }}-
     - name: Building openpilot
       run: scons
 
@@ -121,6 +187,12 @@ jobs:
     - name: Install raylib headless dependencies
       if: ${{ !contains(runner.name, 'nsc') }}
       run: sudo apt-get install -y --no-install-recommends libgles2 libegl1
+    - name: Restore scons cache
+      uses: actions/cache@v6
+      with:
+        path: /tmp/scons_cache
+        key: scons-${{ runner.os }}-${{ github.job }}-${{ github.sha }}
+        restore-keys: scons-${{ runner.os }}-${{ github.job }}-
     - name: Build openpilot
       run: scons
     - name: Run unit tests
@@ -140,8 +212,16 @@ jobs:
     steps:
     - uses: actions/checkout@v7
     - run: ./tools/op.sh setup
+    - name: Restore scons cache
+      uses: actions/cache@v6
+      with:
+        path: /tmp/scons_cache
+        key: scons-${{ runner.os }}-${{ github.job }}-${{ github.sha }}
+        restore-keys: scons-${{ runner.os }}-${{ github.job }}-
     - name: Build openpilot
       run: scons
+    - name: Test strict Mazda replay acceptance policy
+      run: python3 -m unittest openpilot.selfdrive.test.process_replay.test_accepted_deltas
     - name: Run replay
       timeout-minutes: ${{ contains(runner.name, 'nsc') && 2 || 20 }}
       continue-on-error: ${{ github.ref == 'refs/heads/master' }}
@@ -228,6 +308,12 @@ jobs:
       - name: Install raylib headless dependencies
         if: ${{ !contains(runner.name, 'nsc') }}
         run: sudo apt-get install -y --no-install-recommends libgles2 libegl1
+      - name: Restore scons cache
+        uses: actions/cache@v6
+        with:
+          path: /tmp/scons_cache
+          key: scons-${{ runner.os }}-${{ github.job }}-${{ github.sha }}
+          restore-keys: scons-${{ runner.os }}-${{ github.job }}-
       - name: Build openpilot
         run: scons
       - name: Create UI Report

@@ -11,13 +11,13 @@ from openpilot.sunnypilot.system.params_migration import CAMERA_OFFSET_MIGRATION
 
 
 class TestCameraOffsetMigration(OpenpilotTestCase):
-  def test_migrates_legacy_offset_to_neutral(self):
+  def test_preserves_existing_legacy_offset(self):
     params = Params()
     params.put("CameraOffset", -0.08, block=True)
 
     _migrate_camera_offset(params)
 
-    assert params.get("CameraOffset") == 0.0
+    assert params.get("CameraOffset") == -0.08
     assert params.get("CameraOffsetMigrated") == CAMERA_OFFSET_MIGRATION_VERSION
 
   def test_preserves_custom_offset(self):
@@ -29,7 +29,7 @@ class TestCameraOffsetMigration(OpenpilotTestCase):
     assert params.get("CameraOffset") == 0.12
     assert params.get("CameraOffsetMigrated") == CAMERA_OFFSET_MIGRATION_VERSION
 
-  def test_missing_offset_uses_new_neutral_default(self):
+  def test_missing_offset_uses_neutral_default_without_storing_it(self):
     params = Params()
     params.remove("CameraOffset")
 
@@ -39,14 +39,29 @@ class TestCameraOffsetMigration(OpenpilotTestCase):
     assert params.get("CameraOffset", return_default=True) == 0.0
     assert params.get("CameraOffsetMigrated") == CAMERA_OFFSET_MIGRATION_VERSION
 
+  def test_vehicle_migrations_do_not_coerce_stored_offset(self):
+    for brand, platform, offset in (
+      ("mazda", "MAZDA_CX9", -0.08),
+      ("gm", "CHEVROLET_SUBURBAN", 0.17),
+    ):
+      params = Params()
+      params.put("CarPlatformBundle", {"brand": brand, "platform": platform}, block=True)
+      params.put("CameraOffset", offset, block=True)
+      params.remove("CameraOffsetMigrated")
+
+      _migrate_camera_offset(params)
+
+      assert params.get("CameraOffset") == offset
+      assert params.get("CameraOffsetMigrated") == CAMERA_OFFSET_MIGRATION_VERSION
+
   def test_completed_migration_does_not_rewrite_future_value(self):
     params = Params()
     params.put("CameraOffsetMigrated", CAMERA_OFFSET_MIGRATION_VERSION, block=True)
-    params.put("CameraOffset", -0.08, block=True)
+    params.put("CameraOffset", 0.23, block=True)
 
     _migrate_camera_offset(params)
 
-    assert params.get("CameraOffset") == -0.08
+    assert params.get("CameraOffset") == 0.23
 
 
 class TestModelBundleSlotMigration(OpenpilotTestCase):
