@@ -24,7 +24,9 @@ def running_revision() -> str:
       return ""
     commit = metadata.openpilot.git_commit
     return commit if isinstance(commit, str) and re.fullmatch(r"[0-9a-fA-F]{40}", commit) else ""
-  except (OSError, ValueError, KeyError, RuntimeError):
+  except Exception:
+    # get_build_metadata can also raise a generic Exception when no build identity exists.
+    # Failure to identify the running source must disable, never enable, the feature.
     return ""
 
 

@@ -59,3 +59,10 @@ def test_clean_full_git_sha_identifies_current_build():
   with patch("openpilot.sunnypilot.fleet_validation.get_build_metadata", return_value=metadata):
     assert running_revision() == COMMIT
   running_revision.cache_clear()
+
+
+def test_missing_build_metadata_always_fails_closed():
+  running_revision.cache_clear()
+  with patch("openpilot.sunnypilot.fleet_validation.get_build_metadata", side_effect=Exception("no build metadata")):
+    assert running_revision() == ""
+  running_revision.cache_clear()
