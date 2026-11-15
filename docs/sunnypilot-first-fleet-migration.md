@@ -3,7 +3,7 @@
 ## Source provenance
 - Latest SunnyPilot `master` verified November 15, 2026: `c6e564cdcd68dc6334381ac0d929133b1d824479`.
 - Matched native upstream opendbc: `c0e74738a8068b2fc88c68f1f475887e1dec290f`.
-- Our tailored companion: `rjskalet/opendbc@377046da2a9fb7db8fc1131d40cc11928a85832e` (draft PR #15).
+- Our tailored companion: `rjskalet/opendbc@607dcd052dd6b8f79ba04783dc68d0daf4615c7d` (draft PR #15).
 - Working fork prior to integration: `rjskalet/openpilot@ae03dbf65a770a257e401bb326b5a61711be56f4`.
 
 ## Why SunnyPilot first?
@@ -51,3 +51,5 @@ Current SunnyPilot **already includes** Blendful implementation, Cap'n Proto fie
 - A missing `Conversions as CV` import in the donor EPS initialization was fixed in companion opendbc. New unittest-discoverable fleet carParams, CAN parser/packer and EPS fault checks were added.
 - Earlier test functions were not collected by SunnyPilot's unittest runner; these gate/steering-policy tests are now wrapped in unittest classes. Openpilot CI now includes a separate pinned opendbc and native Panda safety job.
 - The correct Mazda hardware firmware and real donor-EPS feedback CAN, plus the Suburban's steering safety, need validation before installation; CI success is not sufficient.
+
+- Native Panda safety discovery exposed a donor EPS test-class MRO error. Companion opendbc commit `607dcd052dd6b8f79ba04783dc68d0daf4615c7d` fixes the test class; safety C/controller limits are unchanged. Review the rerun results before clearing the gate.
