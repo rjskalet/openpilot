@@ -1,5 +1,4 @@
 """Fleet torque rollout must be exact-commit and vehicle-scoped, with no implicit seeding."""
-from types import SimpleNamespace
 from typing import cast
 from unittest.mock import patch
 
