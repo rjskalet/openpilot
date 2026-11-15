@@ -70,9 +70,9 @@ class ModelSettings:
       if not isinstance(arr, np.ndarray) or arr.shape != shape or not np.all(np.isfinite(arr)):
         return False
     plan = model_output.get("plan")
-    return (isinstance(plan, np.ndarray) and plan.ndim == 3 and plan.shape[0] == 1
-            and plan.shape[1] >= 33 and plan.shape[2] >= 2
-            and np.all(np.isfinite(plan)) and np.all(np.diff(plan[0, :, 0]) >= 0))
+    return bool(isinstance(plan, np.ndarray) and plan.ndim == 3 and plan.shape[0] == 1
+                and plan.shape[1] >= 33 and plan.shape[2] >= 2
+                and np.all(np.isfinite(plan)) and np.all(np.diff(plan[0, :, 0]) >= 0))
 
   def blendful_callback(self, model_output, v_ego: float, desire, lane_change_state) -> Callable[[float], float]:
     active = desire == log.Desire.none and lane_change_state == log.LaneChangeState.off

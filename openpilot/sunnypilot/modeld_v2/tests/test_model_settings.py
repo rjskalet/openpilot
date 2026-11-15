@@ -1,9 +1,11 @@
 """Regression for ZoomPilot ModelSettings and guarded Blendful rollout."""
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import patch
 
 import numpy as np
 from openpilot.cereal import log
+from openpilot.common.params import Params
 from openpilot.sunnypilot.modeld_v2.constants import ModelConstants
 from openpilot.sunnypilot.modeld_v2.model_settings import ModelSettings, with_blendful
 
@@ -26,7 +28,7 @@ def make_settings(**values):
   settings = ModelSettings()
   model = SimpleNamespace(lat_delay=0., chestnut=True, LAT_SMOOTH_SECONDS=0.)
   with patch("openpilot.sunnypilot.modeld_v2.model_settings.get_lat_delay", return_value=0.2):
-    assert settings.refresh(FakeSm(), FakeParams(**values), model)
+    assert settings.refresh(FakeSm(), cast(Params, FakeParams(**values)), model)
   return settings, model
 
 def frame():
