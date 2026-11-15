@@ -14,6 +14,12 @@ This branch is the **first isolated migration change**, not the final ZoomPilot-
 - Apply the optional Blendful curvature delta before action smoothing in both stock modeld and sunnypilot/modeld_v2, with independent runtime state and lane-change gating. When disabled the algorithm returns zero.
 - Publish Blendful diagnostics from both modeld paths.
 
+## Stage 2: shared model behavior (pending validation)
+- Native ZoomPilot `ModelSettings` drives both modeld paths, including big-model 0.1-second curvature smoothing and inactive-controller curvature synchronization.
+- Added fail-closed `BlendfulIntegrationValidated` (off by default); stale persisted Blendful=true alone cannot activate corrections.
+- Malformed/non-finite lane or plan geometry disables Blendful for that frame rather than letting the estimator throw.
+- Dedicated tests added for the gate, shape/finite checks, smoothing, lane changes and low-speed wrapper.
+
 ## Deliberately deferred
 - UI renderer and settings menu integration, ZoomPilot ModelSettings/BigModelSmoothing, model-size-specific v0/v1/v2 torque selection, donor-EPS and GM-compatible opendbc rebase, seed/cache migration, comma 4 validation. None of those are represented as done in this PR.
 - No vehicle controller, panda, steering limits, longitudinal behavior, MRCC/ACC or device configurations changed by this draft.

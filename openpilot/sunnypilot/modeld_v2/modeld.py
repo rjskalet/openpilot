@@ -7,7 +7,6 @@ See the LICENSE.md file in the root directory for more details.
 """
 
 from collections.abc import Callable
-from functools import partial
 import os
 os.environ['GMMU'] = '0'
 import numpy as np
@@ -47,12 +46,10 @@ from openpilot.sunnypilot.modeld_v2.fill_model_msg import fill_model_msg, fill_p
 from openpilot.sunnypilot.modeld_v2.parse_model_outputs import Parser
 from openpilot.sunnypilot.modeld_v2.constants import ModelConstants, Plan
 from openpilot.sunnypilot.modeld_v2.meta_helper import load_meta_constants
-from openpilot.sunnypilot.modeld_v2.camera_offset_helper import CameraOffsetHelper
-from openpilot.sunnypilot.modeld_v2.blendful import Blendful
+from openpilot.sunnypilot.modeld_v2.model_settings import ModelSettings
 from openpilot.sunnypilot.modeld_v2.compile_modeld import (derive_frame_skip, make_split_input_queues,
                                                            make_supercombo_input_queues, nv12_copy_size,
                                                            WARP_INPUTS, POLICY_INPUTS)
-from openpilot.sunnypilot.livedelay.helpers import get_lat_delay
 from openpilot.sunnypilot.modeld_v2.modeld_base import ModelStateBase
 from openpilot.sunnypilot.modeld_v2.helpers import load_oob
 from openpilot.sunnypilot.models.helpers import get_active_bundle
@@ -394,7 +391,8 @@ def main(demo=False):
   # messaging
   pub_socks = ["modelV2", "drivingModelData", "cameraOdometry", "modelDataV2SP"] + (["chestnutState"] if CHESTNUT else [])
   pm = PubMaster(pub_socks)
-  sm = SubMaster(["deviceState", "carState", "narrowRoadCameraState", "extrinsicsCalibration", "driverMonitoringState", "carControl", "lateralDelay"])
+  sm = SubMaster(["deviceState", "carState", "narrowRoadCameraState", "extrinsicsCalibration", "driverMonitoringState",
+                  "carControl", "controlsState", "lateralDelay"])
 
   publish_state = PublishState()
   chestnut_state = ChestnutState(pm, model.chestnut) if CHESTNUT else None
@@ -411,7 +409,7 @@ def main(demo=False):
   buf_main, buf_extra = None, None
   meta_main = FrameMeta()
   meta_extra = FrameMeta()
-  camera_offset_helper = CameraOffsetHelper()
+  settings = ModelSettings()
 
 
   if demo:
@@ -421,14 +419,11 @@ def main(demo=False):
   cloudlog.info("modeld got CarParams: %s", CP.brand)
 
   # TODO Move smooth seconds to action function
-  long_delay = CP.longitudinalActuatorDelay + model.LONG_SMOOTH_SECONDS
   prev_action = log.ModelDataV2.Action()
 
   DH = DesireHelper()
   meta_constants = load_meta_constants()
   RELC = RoadEdgeLaneChangeController()
-  blendful = Blendful()
-  blendful_enabled = False  # Default off until hardware replay validation
 
   while True:
     # Keep receiving frames until we are at least 1 frame ahead of previous extra frame
@@ -468,19 +463,18 @@ def main(demo=False):
     is_rhd = sm["driverMonitoringState"].isRHD
     frame_id = sm["narrowRoadCameraState"].frameId
     v_ego = max(sm["carState"].vEgo, 0.)
-    if sm.frame % 60 == 0:
-      model.lat_delay = get_lat_delay(params, sm["lateralDelay"].lateralDelay)
+    if settings.refresh(sm, params, model):
       model.PLANPLUS_CONTROL = params.get("PlanplusControl", return_default=True)
-      camera_offset_helper.set_offset(params.get("CameraOffset", return_default=True))
-      blendful_enabled = params.get_bool("Blendful")
+    big_lat_smooth = settings.big_lat_smooth(model)
     lat_delay = model.lat_delay + model.LAT_SMOOTH_SECONDS
+    long_delay = CP.longitudinalActuatorDelay + model.LONG_SMOOTH_SECONDS
     if sm.updated["extrinsicsCalibration"] and sm.seen['narrowRoadCameraState'] and sm.seen['deviceState']:
       device_from_calib_euler = np.array(sm["extrinsicsCalibration"].rpyCalib, dtype=np.float32)
       dc = DEVICE_CAMERAS[(str(sm['deviceState'].deviceType), str(sm['narrowRoadCameraState'].sensor))]
       main_intrinsics = dc.wide_road.intrinsics if main_wide_camera else dc.narrow_road.intrinsics
       model_transform_main = get_warp_matrix(device_from_calib_euler, main_intrinsics, False).astype(np.float32)
       model_transform_extra = get_warp_matrix(device_from_calib_euler, dc.wide_road.intrinsics, True).astype(np.float32)
-      model_transform_main, model_transform_extra = camera_offset_helper.update(model_transform_main, model_transform_extra, sm, main_wide_camera)
+      model_transform_main, model_transform_extra = settings.camera_offset.update(model_transform_main, model_transform_extra, sm, main_wide_camera)
       live_calib_seen = True
 
     traffic_convention = np.zeros(2)
@@ -545,10 +539,11 @@ def main(demo=False):
       posenet_send = messaging.new_message('cameraOdometry')
       mdv2sp_send = messaging.new_message('modelDataV2SP')
 
-      blendful_callback = partial(blendful.update, model_output, v_ego,
-                                  desire == log.Desire.none and DH.lane_change_state == log.LaneChangeState.off,
-                                  enabled=blendful_enabled)
-      action = model.get_action_from_model(model_output, prev_action, lat_action_t, long_action_t, v_ego, blendful_callback)
+      if sm.seen["controlsState"] and sm.valid["controlsState"] and not sm["carControl"].latActive:
+        prev_action.desiredCurvature = sm["controlsState"].curvature
+      action = model.get_action_from_model(model_output, prev_action, lat_action_t, long_action_t, v_ego,
+                                           settings.blendful_callback(model_output, v_ego, desire, DH.lane_change_state))
+      settings.smooth_curvature(action, prev_action, big_lat_smooth)
       prev_action = action
       fill_model_msg(drivingdata_send, modelv2_send, model_output, action,
                      publish_state, meta_main.frame_id, meta_extra.frame_id, frame_id,
@@ -565,7 +560,7 @@ def main(demo=False):
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
       mdv2sp_send.valid = modelv2_send.valid
       mdv2sp_send.modelDataV2SP.laneTurnDirection = DH.lane_turn_direction
-      blendful.fill(mdv2sp_send.modelDataV2SP)
+      settings.blendful.fill(mdv2sp_send.modelDataV2SP)
       drivingdata_send.drivingModelData.meta.laneChangeState = DH.lane_change_state
       drivingdata_send.drivingModelData.meta.laneChangeDirection = DH.lane_change_direction
 
