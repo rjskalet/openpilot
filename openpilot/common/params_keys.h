@@ -267,6 +267,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"LaneTurnValue", {PERSISTENT | BACKUP, FLOAT, "19.0"}},
     {"Blendful", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"BlendfulIntegrationValidated", {PERSISTENT, BOOL, "0"}},
+    {"BlendfulValidatedCommitMazda", {PERSISTENT, STRING}},
+    {"BlendfulValidatedCommitSuburban", {PERSISTENT, STRING}},
     {"PlanplusControl", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
 
     // mapd
@@ -310,6 +312,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"LiveTorqueParamsRelaxedToggle", {PERSISTENT | BACKUP , BOOL}},
     {"TorqueControlTune", {PERSISTENT | BACKUP, FLOAT, "0.0"}},
     {"FleetTorqueIntegrationValidated", {PERSISTENT, BOOL, "0"}},
+    {"FleetTorqueValidatedCommitMazda", {PERSISTENT, STRING}},
+    {"FleetTorqueValidatedCommitSuburban", {PERSISTENT, STRING}},
     {"SpeedDependentTorqueToggle", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"SuburbanFactorFloorScale", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
     {"SuburbanLiveTableDefaultsApplied", {PERSISTENT | BACKUP, BOOL}},

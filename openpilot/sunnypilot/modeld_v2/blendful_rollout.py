@@ -5,5 +5,8 @@ Blendful=True from an earlier installation. Only intentionally validated
 vehicle builds may enable steering curvature correction.
 """
 
-def blendful_integration_enabled(params) -> bool:
-  return bool(params.get_bool("Blendful") and params.get_bool("BlendfulIntegrationValidated"))
+from openpilot.sunnypilot.fleet_validation import feature_validated
+
+
+def blendful_integration_enabled(params, cp) -> bool:
+  return bool(params.get_bool("Blendful") and feature_validated(params, cp, "Blendful"))

@@ -17,6 +17,7 @@ from opendbc.sunnypilot.car.interfaces import get_speed_dep_config_for_car, get_
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
+from openpilot.sunnypilot.fleet_validation import feature_validated
 from openpilot.sunnypilot.livedelay.helpers import get_lat_delay
 from openpilot.sunnypilot.modeld_v2.modeld_base import ModelStateBase
 from openpilot.sunnypilot.selfdrive.controls.lib.blinker_pause_lateral import BlinkerPauseLateral
@@ -38,10 +39,10 @@ class ControlsExt(ModelStateBase):
     # Keep every non-donor-EPS car on the exact SunnyPilot path. ZoomPilot-specific services,
     # controller selection, rail classification, and live bins are isolated to the Mazda EPS
     # configuration this branch is intended to support.
-    self._zoompilot_mazda = (params.get_bool('FleetTorqueIntegrationValidated') and CP.brand == 'mazda'
+    fleet_torque_validated = feature_validated(params, CP, "FleetTorque")
+    self._zoompilot_mazda = (fleet_torque_validated and CP.brand == 'mazda'
                              and bool(CP.flags & MazdaFlags.STEER_TO_ZERO_EPS))
-    self._speed_dependent_torque = (params.get_bool('FleetTorqueIntegrationValidated')
-                                    and bool(get_speed_dep_config_for_car(CP)))
+    self._speed_dependent_torque = (fleet_torque_validated and bool(get_speed_dep_config_for_car(CP)))
     self._steer_slew_schedule = get_steer_slew_schedule(CP) if self._zoompilot_mazda else None
     self._lat_active_last = False
     self._applied_torque_prev: float | None = None

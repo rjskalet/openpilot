@@ -60,7 +60,7 @@ class TorqueEstimatorExt:
     self.use_live_torque_params = self._params.get_bool("LiveTorqueParamsToggle")
     self.custom_torque_params = self._params.get_bool("CustomTorqueParams")
     self.torque_override_enabled = self._params.get_bool("TorqueParamsOverrideEnabled")
-    self.speed_binned = (self._params.get_bool('FleetTorqueIntegrationValidated')
+    self.speed_binned = (feature_validated(self._params, self.CP, "FleetTorque")
                          and self.CP.lateralTuning.which() == 'torque'
                          and self._params.get_bool("SpeedDependentTorqueToggle")
                          and self.enforce_torque_control_toggle
@@ -123,6 +123,7 @@ class TorqueEstimatorExt:
     from openpilot.selfdrive.locationd.torqued import TorqueBuckets, STEER_BUCKET_BOUNDS, \
       POINTS_PER_BUCKET, MIN_FILTER_DECAY
     from opendbc.sunnypilot.car.interfaces import get_speed_dep_config_for_car
+from openpilot.sunnypilot.fleet_validation import feature_validated
 
     cfg = get_speed_dep_config_for_car(self.CP)
     self.speed_dep_seed_version = int(cfg.get('seed_version', 0))

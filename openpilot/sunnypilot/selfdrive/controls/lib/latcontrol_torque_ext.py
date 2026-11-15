@@ -8,6 +8,7 @@ See the LICENSE.md file in the root directory for more details.
 import numpy as np
 
 from opendbc.sunnypilot.car.interfaces import get_steer_rail_schedule
+from openpilot.sunnypilot.fleet_validation import feature_validated
 from openpilot.sunnypilot.selfdrive.controls.lib.nnlc.nnlc import NeuralNetworkLateralControl
 from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_ext_override import LatControlTorqueExtOverride
 
@@ -18,7 +19,7 @@ class LatControlTorqueExt(NeuralNetworkLateralControl, LatControlTorqueExtOverri
     LatControlTorqueExtOverride.__init__(self, CP)
     self._output_overrides_disabled = False
     self.steer_rail_schedule = (get_steer_rail_schedule(CP)
-                                if self.params.get_bool('FleetTorqueIntegrationValidated') else None)
+                                if feature_validated(self.params, CP, "FleetTorque") else None)
     self._commanded = False
     self._applied_torque = 0.0
     self._at_rail = False

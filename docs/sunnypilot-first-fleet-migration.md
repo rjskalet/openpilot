@@ -24,6 +24,17 @@ Current SunnyPilot **already includes** Blendful implementation, Cap'n Proto fie
 - Keep the original measured Suburban `SuburbanFactorFloorScale` knob but at its neutral 1.0 setting; do not ship PR #21's experimental U-floor tune.
 - The controller stack is staged for CI; it is **not** yet certified in newest SunnyPilot.
 
+## Per-vehicle and per-commit rollout protection
+- The two original booleans `BlendfulIntegrationValidated` and `FleetTorqueIntegrationValidated` are **not sufficient** on their own.
+- Each feature now requires an exact full SHA in its matching `BlendfulValidatedCommitMazda`, `BlendfulValidatedCommitSuburban`, `FleetTorqueValidatedCommitMazda`, or `FleetTorqueValidatedCommitSuburban` key, matching the **running build metadata**, not a stale saved `GitCommit`.
+- Mazda approvals apply only to CX-9 firmware-confirmed steer-to-zero EPS. Suburban approvals apply only to the exact camera-harness fingerprint. No automatic cross-car or cross-version carryover.
+- Both global enable booleans remain false by default. No validation token is preloaded; this PR cannot enable the experimental logic by itself.
+- Do not hand-set these keys until both cars have passed independent replay, Panda and on-device validation.
+
+## Mazda fault-handling decision
+- Keep SunnyPilot's default temporary steering fault as a disengaging event; the old donor-EPS temporary-fault-to-silent-warning downgrade is deliberately **not** restored.
+- The companion opendbc differentiates permanent EPS faults from camera-only faults; true EPS faults remain permanent and camera-only errors remain temporary.
+
 ## Must port/validate before any installation
 1. Our existing Mazda donor-EPS logic: firmware-verified, 1200-count envelope and 12/12 limits, proportional torque scaling, speed-dependent EPS rail, non-delivery protections, factory MRCC.
 2. Suburban camera-ACC, ALT_ACCS, factory ACC, steering ceiling 300, 10/15 slew, no OP longitudinal.

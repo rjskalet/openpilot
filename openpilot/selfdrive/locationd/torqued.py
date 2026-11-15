@@ -14,6 +14,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.locationd.helpers import PointBuckets, ParameterEstimator, PoseCalibrator, Pose
 from openpilot.sunnypilot.livedelay.helpers import get_lat_delay
 from openpilot.sunnypilot.selfdrive.locationd.torqued_ext import TorqueEstimatorExt
+from openpilot.sunnypilot.fleet_validation import feature_validated
 
 HISTORY = 5  # secs
 POINTS_PER_BUCKET = 1500
@@ -122,7 +123,7 @@ class TorqueEstimator(ParameterEstimator, TorqueEstimatorExt):
     # try to restore cached params
     params = Params()
     self.params = params
-    torque_cache_key, car_params_cache_key = get_torque_cache_keys(CP, self._params.get_bool("FleetTorqueIntegrationValidated"))
+    torque_cache_key, car_params_cache_key = get_torque_cache_keys(CP, feature_validated(self._params, CP, "FleetTorque"))
     params_cache = params.get(car_params_cache_key)
     torque_cache = params.get(torque_cache_key)
 
@@ -325,7 +326,7 @@ def main(demo=False):
       params.put("LiveTorqueParameters", msg_bytes)
 
       torque_cache_key, car_params_cache_key = get_torque_cache_keys(
-        estimator.CP, params.get_bool("FleetTorqueIntegrationValidated"))
+        estimator.CP, feature_validated(params, estimator.CP, "FleetTorque"))
       if torque_cache_key != "LiveTorqueParameters":
         params.put(torque_cache_key, msg_bytes)
         current_car_params = params.get("CarParams")

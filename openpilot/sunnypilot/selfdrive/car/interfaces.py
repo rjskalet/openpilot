@@ -10,12 +10,14 @@ from opendbc.car import structs
 from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.car.mazda.values import MazdaFlags
 from opendbc.sunnypilot.car.interfaces import get_tune_scale
+from openpilot.sunnypilot.fleet_validation import feature_validated
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.sunnypilot.selfdrive.controls.lib.nnlc.helpers import get_nn_model_path
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.helpers import set_speed_limit_assist_availability
 
 from openpilot.sunnypilot.sunnylink.statsd import STATSLOGSP
+import openpilot.system.sentry as sentry
 
 
 MAZDA_STEER_TO_ZERO_TORQUE_TUNE = 2.0
@@ -33,7 +35,7 @@ def _seed_mazda_torque_defaults(CP: structs.CarParams, params: Params | None = N
   if params is None:
     params = Params()
 
-  if not params.get_bool("FleetTorqueIntegrationValidated"):
+  if not feature_validated(params, CP, "FleetTorque"):
     return
   if CP.brand != "mazda" or not (CP.flags & MazdaFlags.STEER_TO_ZERO_EPS):
     return
@@ -58,7 +60,7 @@ def _seed_suburban_live_table_defaults(CP: structs.CarParams, params: Params | N
     return
   if params is None:
     params = Params()
-  if not params.get_bool("FleetTorqueIntegrationValidated") or params.get_bool("SuburbanLiveTableDefaultsApplied"):
+  if not feature_validated(params, CP, "FleetTorque") or params.get_bool("SuburbanLiveTableDefaultsApplied"):
     return
 
   params.put_bool("EnforceTorqueControl", True, block=True)
