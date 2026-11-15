@@ -16,6 +16,12 @@ Current SunnyPilot **already includes** Blendful implementation, Cap'n Proto fie
 - Minimal regression tests for the two-factor activation.
 - Native latest SunnyPilot panda and other submodule pins are preserved.
 
+## Stage 2: custom torque stack reintroduced under a fail-closed gate
+- Reintroduced our v2 torque controller, derivative schedule, center-chatter deadzone and steering-limit classifier, speed-binned live torque learning, vehicle-specific caches, and `CustomReserved19` telemetry schema/service.
+- `FleetTorqueIntegrationValidated` defaults to **false**. Stored old toggle values alone cannot turn on v2 or speed-dependent torque updates; new controller/learner activation requires explicit validation.
+- Keep the original measured Suburban `SuburbanFactorFloorScale` knob but at its neutral 1.0 setting; do not ship PR #21's experimental U-floor tune.
+- The controller stack is staged for CI; it is **not** yet certified in newest SunnyPilot.
+
 ## Must port/validate before any installation
 1. Our existing Mazda donor-EPS logic: firmware-verified, 1200-count envelope and 12/12 limits, proportional torque scaling, speed-dependent EPS rail, non-delivery protections, factory MRCC.
 2. Suburban camera-ACC, ALT_ACCS, factory ACC, steering ceiling 300, 10/15 slew, no OP longitudinal.
