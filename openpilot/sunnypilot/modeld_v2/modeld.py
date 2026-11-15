@@ -7,6 +7,7 @@ See the LICENSE.md file in the root directory for more details.
 """
 
 from collections.abc import Callable
+from functools import partial
 import os
 os.environ['GMMU'] = '0'
 import numpy as np
@@ -544,9 +545,9 @@ def main(demo=False):
       posenet_send = messaging.new_message('cameraOdometry')
       mdv2sp_send = messaging.new_message('modelDataV2SP')
 
-      blendful_callback = lambda curvature: blendful.update(model_output, v_ego,
-                                                              desire == log.Desire.none and DH.lane_change_state == log.LaneChangeState.off,
-                                                              curvature, enabled=blendful_enabled)
+      blendful_callback = partial(blendful.update, model_output, v_ego,
+                                  desire == log.Desire.none and DH.lane_change_state == log.LaneChangeState.off,
+                                  enabled=blendful_enabled)
       action = model.get_action_from_model(model_output, prev_action, lat_action_t, long_action_t, v_ego, blendful_callback)
       prev_action = action
       fill_model_msg(drivingdata_send, modelv2_send, model_output, action,

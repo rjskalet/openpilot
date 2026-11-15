@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from collections.abc import Callable
 import ctypes
-from functools import cached_property
+from functools import cached_property, partial
 import os
 os.environ['GMMU'] = '0' # for chestnut fast loading, noop for qcom
 from tinygrad.device import Device
@@ -465,9 +465,9 @@ def main(demo=False):
       drivingdata_send = messaging.new_message('drivingModelData')
       posenet_send = messaging.new_message('cameraOdometry')
 
-      blendful_callback = lambda curvature: blendful.update(model_output, v_ego,
-                                                              desire == log.Desire.none and DH.lane_change_state == log.LaneChangeState.off,
-                                                              curvature, enabled=blendful_enabled)
+      blendful_callback = partial(blendful.update, model_output, v_ego,
+                                  desire == log.Desire.none and DH.lane_change_state == log.LaneChangeState.off,
+                                  enabled=blendful_enabled)
       action = get_action_from_model(model_output, prev_action, lat_action_t, long_action_t, v_ego, blendful_callback)
       prev_action = action
       fill_model_msg(modelv2_send, model_output, action,
