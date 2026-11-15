@@ -1,4 +1,5 @@
 """Exact-commit, per-vehicle feature validation and dirty/unknown build behavior."""
+import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -22,45 +23,47 @@ def cp(brand, fingerprint, flags=0):
   return SimpleNamespace(brand=brand, carFingerprint=fingerprint, flags=flags)
 
 
-def test_donor_only_and_no_unsupported_platform():
-  assert fleet_vehicle(cp("mazda", "MAZDA_CX9", int(MazdaFlags.STEER_TO_ZERO_EPS))) == "Mazda"
-  assert fleet_vehicle(cp("mazda", "MAZDA_CX9")) is None
-  assert fleet_vehicle(cp("gm", SUBURBAN)) == "Suburban"
-  assert fleet_vehicle(cp("gm", "GMC_YUKON")) is None
+
+class TestFleetValidation(unittest.TestCase):
+  def test_donor_only_and_no_unsupported_platform(self):
+    assert fleet_vehicle(cp("mazda", "MAZDA_CX9", int(MazdaFlags.STEER_TO_ZERO_EPS))) == "Mazda"
+    assert fleet_vehicle(cp("mazda", "MAZDA_CX9")) is None
+    assert fleet_vehicle(cp("gm", SUBURBAN)) == "Suburban"
+    assert fleet_vehicle(cp("gm", "GMC_YUKON")) is None
 
 
-def test_revision_mismatch_disables_fleet_torque():
-  params = Params(FleetTorqueIntegrationValidated=True, FleetTorqueValidatedCommitSuburban="a" * 40)
-  with patch("openpilot.sunnypilot.fleet_validation.running_revision", return_value=COMMIT):
-    assert not feature_validated(params, cp("gm", SUBURBAN), "FleetTorque")
+  def test_revision_mismatch_disables_fleet_torque(self):
+    params = Params(FleetTorqueIntegrationValidated=True, FleetTorqueValidatedCommitSuburban="a" * 40)
+    with patch("openpilot.sunnypilot.fleet_validation.running_revision", return_value=COMMIT):
+      assert not feature_validated(params, cp("gm", SUBURBAN), "FleetTorque")
 
 
-def test_revision_and_vehicle_pair_must_match():
-  params = Params(FleetTorqueIntegrationValidated=True, FleetTorqueValidatedCommitMazda=COMMIT)
-  with patch("openpilot.sunnypilot.fleet_validation.running_revision", return_value=COMMIT):
-    assert feature_validated(params, cp("mazda", "MAZDA_CX9", int(MazdaFlags.STEER_TO_ZERO_EPS)), "FleetTorque")
-    assert not feature_validated(params, cp("gm", SUBURBAN), "FleetTorque")
+  def test_revision_and_vehicle_pair_must_match(self):
+    params = Params(FleetTorqueIntegrationValidated=True, FleetTorqueValidatedCommitMazda=COMMIT)
+    with patch("openpilot.sunnypilot.fleet_validation.running_revision", return_value=COMMIT):
+      assert feature_validated(params, cp("mazda", "MAZDA_CX9", int(MazdaFlags.STEER_TO_ZERO_EPS)), "FleetTorque")
+      assert not feature_validated(params, cp("gm", SUBURBAN), "FleetTorque")
 
 
-def test_untrusted_build_identity_cannot_validate():
-  for commit, dirty in (("unknown", False), (COMMIT, True), ("a" * 12, False)):
-    metadata = SimpleNamespace(openpilot=SimpleNamespace(git_commit=commit, is_dirty=dirty))
+  def test_untrusted_build_identity_cannot_validate(self):
+    for commit, dirty in (("unknown", False), (COMMIT, True), ("a" * 12, False)):
+      metadata = SimpleNamespace(openpilot=SimpleNamespace(git_commit=commit, is_dirty=dirty))
+      running_revision.cache_clear()
+      with patch("openpilot.sunnypilot.fleet_validation.get_build_metadata", return_value=metadata):
+        assert running_revision() == ""
+      running_revision.cache_clear()
+
+
+  def test_clean_full_git_sha_identifies_current_build(self):
+    metadata = SimpleNamespace(openpilot=SimpleNamespace(git_commit=COMMIT, is_dirty=False))
     running_revision.cache_clear()
     with patch("openpilot.sunnypilot.fleet_validation.get_build_metadata", return_value=metadata):
-      assert running_revision() == ""
+      assert running_revision() == COMMIT
     running_revision.cache_clear()
 
 
-def test_clean_full_git_sha_identifies_current_build():
-  metadata = SimpleNamespace(openpilot=SimpleNamespace(git_commit=COMMIT, is_dirty=False))
-  running_revision.cache_clear()
-  with patch("openpilot.sunnypilot.fleet_validation.get_build_metadata", return_value=metadata):
-    assert running_revision() == COMMIT
-  running_revision.cache_clear()
-
-
-def test_missing_build_metadata_always_fails_closed():
-  running_revision.cache_clear()
-  with patch("openpilot.sunnypilot.fleet_validation.get_build_metadata", side_effect=Exception("no build metadata")):
-    assert running_revision() == ""
-  running_revision.cache_clear()
+  def test_missing_build_metadata_always_fails_closed(self):
+    running_revision.cache_clear()
+    with patch("openpilot.sunnypilot.fleet_validation.get_build_metadata", side_effect=Exception("no build metadata")):
+      assert running_revision() == ""
+    running_revision.cache_clear()

@@ -3,7 +3,7 @@
 ## Source provenance
 - Latest SunnyPilot `master` verified November 15, 2026: `c6e564cdcd68dc6334381ac0d929133b1d824479`.
 - Matched native upstream opendbc: `c0e74738a8068b2fc88c68f1f475887e1dec290f`.
-- Our tailored companion: `rjskalet/opendbc@ca0d8a5cc65ed9bef3c66106712d13c29a9f5f36` (draft PR #15).
+- Our tailored companion: `rjskalet/opendbc@377046da2a9fb7db8fc1131d40cc11928a85832e` (draft PR #15).
 - Working fork prior to integration: `rjskalet/openpilot@ae03dbf65a770a257e401bb326b5a61711be56f4`.
 
 ## Why SunnyPilot first?
@@ -44,3 +44,10 @@ Current SunnyPilot **already includes** Blendful implementation, Cap'n Proto fie
 6. Full release and regression validation (Panda safety, CIF, process replay Mazda+GM routes, fingerprint and engagement, Comma 4 build, then supervised road checks).
 
 **Not installation ready.** Do not merge to master or install on either car.
+
+## CI validation follow-up (2026-11-15)
+- 2018 Mazda CX-9 factory wheelbase is 2,930 mm; confirmed in the Mazda 2018 CX-9 owner's manual (https://www.mazdausa.com/static/manuals/2018/cx9/contents/10020103.html). The 3.10 m replay reference is not correct for this platform and must not be restored solely to hide replay diffs.
+- Mazda `controlsd` and `card` outputs still diverge from the upstream recorded replay baseline. This is an explicitly **open** validation item: analyze the corrected geometry's dynamics and real car logs before accepting a new reference.
+- A missing `Conversions as CV` import in the donor EPS initialization was fixed in companion opendbc. New unittest-discoverable fleet carParams, CAN parser/packer and EPS fault checks were added.
+- Earlier test functions were not collected by SunnyPilot's unittest runner; these gate/steering-policy tests are now wrapped in unittest classes. Openpilot CI now includes a separate pinned opendbc and native Panda safety job.
+- The correct Mazda hardware firmware and real donor-EPS feedback CAN, plus the Suburban's steering safety, need validation before installation; CI success is not sufficient.

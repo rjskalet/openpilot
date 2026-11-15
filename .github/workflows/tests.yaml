@@ -193,6 +193,22 @@ jobs:
         max_attempts: 3
         command: cd ${{ github.workspace }}/ci-artifacts && git push origin process-replay --force
 
+  fleet_opendbc_validation:
+    name: Mazda/GM carParams, CAN and Panda safety
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: true
+    - name: Run pinned opendbc fleet interface, EPS fault and CAN round-trip tests
+      working-directory: opendbc_repo
+      run: |
+        source setup.sh
+        python -m unittest -v opendbc.car.tests.test_fleet_car_params opendbc.car.tests.test_mazda_fault_decoding
+    - name: Run native Panda safety tests for all modes (including Mazda donor and GM)
+      run: ./opendbc_repo/opendbc/safety/tests/test.sh
+
   simulator_driving:
     name: simulator driving
     runs-on: ${{

@@ -1,4 +1,5 @@
 """Fleet torque rollout must be exact-commit and vehicle-scoped, with no implicit seeding."""
+import unittest
 from typing import cast
 from unittest.mock import patch
 
@@ -30,41 +31,43 @@ def cp(candidate, brand, flags=0):
   return structs.CarParams(brand=brand, carFingerprint=candidate, flags=flags)
 
 
-def test_old_global_gate_alone_will_not_seed_both_cars():
-  settings = FakeParams(FleetTorqueIntegrationValidated=True)
-  suburban = cp(GM.CHEVROLET_SUBURBAN_CAMERA_11TH_GEN, "gm")
-  mazda = cp(MAZDA.MAZDA_CX9, "mazda", int(MazdaFlags.STEER_TO_ZERO_EPS))
-  with patch("openpilot.sunnypilot.fleet_validation.running_revision", return_value=COMMIT):
-    _seed_suburban_live_table_defaults(suburban, cast(Params, settings))
-    _seed_mazda_torque_defaults(mazda, cast(Params, settings))
-  assert not settings.get_bool("SuburbanLiveTableDefaultsApplied")
-  assert not settings.get_bool("MazdaTorqueDefaultsApplied")
+
+class TestFleetTorqueRollout(unittest.TestCase):
+  def test_old_global_gate_alone_will_not_seed_both_cars(self):
+    settings = FakeParams(FleetTorqueIntegrationValidated=True)
+    suburban = cp(GM.CHEVROLET_SUBURBAN_CAMERA_11TH_GEN, "gm")
+    mazda = cp(MAZDA.MAZDA_CX9, "mazda", int(MazdaFlags.STEER_TO_ZERO_EPS))
+    with patch("openpilot.sunnypilot.fleet_validation.running_revision", return_value=COMMIT):
+      _seed_suburban_live_table_defaults(suburban, cast(Params, settings))
+      _seed_mazda_torque_defaults(mazda, cast(Params, settings))
+    assert not settings.get_bool("SuburbanLiveTableDefaultsApplied")
+    assert not settings.get_bool("MazdaTorqueDefaultsApplied")
 
 
-def test_suburban_approval_does_not_activate_mazda():
-  settings = FakeParams(FleetTorqueIntegrationValidated=True, FleetTorqueValidatedCommitSuburban=COMMIT)
-  suburban = cp(GM.CHEVROLET_SUBURBAN_CAMERA_11TH_GEN, "gm")
-  mazda = cp(MAZDA.MAZDA_CX9, "mazda", int(MazdaFlags.STEER_TO_ZERO_EPS))
-  with patch("openpilot.sunnypilot.fleet_validation.running_revision", return_value=COMMIT):
-    assert feature_validated(settings, suburban, "FleetTorque")
-    assert not feature_validated(settings, mazda, "FleetTorque")
-    _seed_suburban_live_table_defaults(suburban, cast(Params, settings))
-    _seed_mazda_torque_defaults(mazda, cast(Params, settings))
-  assert settings.get_bool("SuburbanLiveTableDefaultsApplied")
-  assert not settings.get_bool("MazdaTorqueDefaultsApplied")
+  def test_suburban_approval_does_not_activate_mazda(self):
+    settings = FakeParams(FleetTorqueIntegrationValidated=True, FleetTorqueValidatedCommitSuburban=COMMIT)
+    suburban = cp(GM.CHEVROLET_SUBURBAN_CAMERA_11TH_GEN, "gm")
+    mazda = cp(MAZDA.MAZDA_CX9, "mazda", int(MazdaFlags.STEER_TO_ZERO_EPS))
+    with patch("openpilot.sunnypilot.fleet_validation.running_revision", return_value=COMMIT):
+      assert feature_validated(settings, suburban, "FleetTorque")
+      assert not feature_validated(settings, mazda, "FleetTorque")
+      _seed_suburban_live_table_defaults(suburban, cast(Params, settings))
+      _seed_mazda_torque_defaults(mazda, cast(Params, settings))
+    assert settings.get_bool("SuburbanLiveTableDefaultsApplied")
+    assert not settings.get_bool("MazdaTorqueDefaultsApplied")
 
 
-def test_donor_eps_torque_is_locked_to_validated_revision():
-  settings = FakeParams(FleetTorqueIntegrationValidated=True, FleetTorqueValidatedCommitMazda=COMMIT)
-  mazda = cp(MAZDA.MAZDA_CX9, "mazda", int(MazdaFlags.STEER_TO_ZERO_EPS))
-  with patch("openpilot.sunnypilot.fleet_validation.running_revision", return_value="b" * 40):
-    _seed_mazda_torque_defaults(mazda, cast(Params, settings))
-  assert not settings.get_bool("MazdaTorqueDefaultsApplied")
+  def test_donor_eps_torque_is_locked_to_validated_revision(self):
+    settings = FakeParams(FleetTorqueIntegrationValidated=True, FleetTorqueValidatedCommitMazda=COMMIT)
+    mazda = cp(MAZDA.MAZDA_CX9, "mazda", int(MazdaFlags.STEER_TO_ZERO_EPS))
+    with patch("openpilot.sunnypilot.fleet_validation.running_revision", return_value="b" * 40):
+      _seed_mazda_torque_defaults(mazda, cast(Params, settings))
+    assert not settings.get_bool("MazdaTorqueDefaultsApplied")
 
 
-def test_cache_keys_preserve_separate_vehicle_names_when_authorized():
-  suburban = cp(GM.CHEVROLET_SUBURBAN_CAMERA_11TH_GEN, "gm")
-  mazda = cp(MAZDA.MAZDA_CX9, "mazda", int(MazdaFlags.STEER_TO_ZERO_EPS))
-  assert get_torque_cache_keys(suburban, False) == ("LiveTorqueParameters", "CarParamsPrevRoute")
-  assert get_torque_cache_keys(suburban, True) == ("LiveTorqueParametersSuburban", "LiveTorqueCarParamsSuburban")
-  assert get_torque_cache_keys(mazda, True) == ("LiveTorqueParametersMazda", "LiveTorqueCarParamsMazda")
+  def test_cache_keys_preserve_separate_vehicle_names_when_authorized(self):
+    suburban = cp(GM.CHEVROLET_SUBURBAN_CAMERA_11TH_GEN, "gm")
+    mazda = cp(MAZDA.MAZDA_CX9, "mazda", int(MazdaFlags.STEER_TO_ZERO_EPS))
+    assert get_torque_cache_keys(suburban, False) == ("LiveTorqueParameters", "CarParamsPrevRoute")
+    assert get_torque_cache_keys(suburban, True) == ("LiveTorqueParametersSuburban", "LiveTorqueCarParamsSuburban")
+    assert get_torque_cache_keys(mazda, True) == ("LiveTorqueParametersMazda", "LiveTorqueCarParamsMazda")
