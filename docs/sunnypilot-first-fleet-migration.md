@@ -3,7 +3,7 @@
 ## Source provenance
 - Latest SunnyPilot `master` verified November 15, 2026: `c6e564cdcd68dc6334381ac0d929133b1d824479`.
 - Matched native upstream opendbc: `c0e74738a8068b2fc88c68f1f475887e1dec290f`.
-- Our tailored companion: `rjskalet/opendbc@b11ab66a00160a6daa5a3773a788f63dcd17e1ca` (draft PR #15).
+- Our tailored companion: `rjskalet/opendbc@ca0d8a5cc65ed9bef3c66106712d13c29a9f5f36` (draft PR #15).
 - Working fork prior to integration: `rjskalet/openpilot@ae03dbf65a770a257e401bb326b5a61711be56f4`.
 
 ## Why SunnyPilot first?
