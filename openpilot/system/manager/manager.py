@@ -8,7 +8,6 @@ import traceback
 
 from openpilot.cereal import log
 import openpilot.cereal.messaging as messaging
-import openpilot.system.sentry as sentry
 from openpilot.common.utils import atomic_write
 from openpilot.common.params import Params, ParamKeyFlag
 from openpilot.common.text_window import TextWindow
@@ -21,7 +20,6 @@ from openpilot.common.swaglog import cloudlog, add_file_handler
 from openpilot.common.version import get_build_metadata
 from openpilot.common.hardware.hw import Paths
 
-from openpilot.sunnypilot.selfdrive.car.interfaces import seed_car_defaults_offroad
 from openpilot.sunnypilot.system.params_migration import run_migration
 
 
@@ -53,7 +51,6 @@ def manager_init() -> None:
 
   if not PC:
     run_migration(params)
-    seed_car_defaults_offroad(params)
 
   # set unset params to their default value
   for k in params.all_keys():
@@ -88,15 +85,15 @@ def manager_init() -> None:
     dongle_id = reg_res
   else:
     raise Exception(f"Registration failed for device {serial}")
-  os.environ['DONGLE_ID'] = dongle_id
-  os.environ['GIT_ORIGIN'] = build_metadata.openpilot.git_normalized_origin
-  os.environ['GIT_BRANCH'] = build_metadata.channel
-  os.environ['GIT_COMMIT'] = build_metadata.openpilot.git_commit
+  os.environ['DONGLE_ID'] = dongle_id  # Needed for swaglog
+  os.environ['GIT_ORIGIN'] = build_metadata.openpilot.git_normalized_origin # Needed for swaglog
+  os.environ['GIT_BRANCH'] = build_metadata.channel # Needed for swaglog
+  os.environ['GIT_COMMIT'] = build_metadata.openpilot.git_commit # Needed for swaglog
 
   if not build_metadata.openpilot.is_dirty:
     os.environ['CLEAN'] = '1'
 
-  sentry.init(sentry.SentryProject.SELFDRIVE)
+  # init logging
   cloudlog.bind_global(dongle_id=dongle_id,
                        version=build_metadata.openpilot.version,
                        origin=build_metadata.openpilot.git_normalized_origin,
@@ -105,11 +102,12 @@ def manager_init() -> None:
                        dirty=build_metadata.openpilot.is_dirty,
                        device=HARDWARE.get_device_type())
 
-
 def manager_cleanup() -> None:
+  # send signals to kill all procs
   for p in managed_processes.values():
     p.stop(block=False)
 
+  # ensure all are killed
   for p in managed_processes.values():
     p.stop(block=True)
 
@@ -153,6 +151,7 @@ def manager_thread() -> None:
     if ignition and not ignition_prev:
       params.clear_all(ParamKeyFlag.CLEAR_ON_IGNITION_ON)
 
+    # update offroad state for services that don't subscribe to deviceState
     if started != started_prev:
       params.put_bool("IsOffroad", not started, block=True)
 
@@ -166,10 +165,12 @@ def manager_thread() -> None:
     print(running)
     cloudlog.debug(running)
 
+    # send managerState
     msg = messaging.new_message('managerState', valid=True)
     msg.managerState.processes = [p.get_process_state_msg() for p in managed_processes.values()]
     pm.send('managerState', msg)
 
+    # kick AGNOS power monitoring watchdog
     try:
       if sm.all_checks(['deviceState']):
         with atomic_write("/var/tmp/power_watchdog", "w", overwrite=True) as f:
@@ -177,6 +178,7 @@ def manager_thread() -> None:
     except Exception:
       pass
 
+    # Exit main loop when uninstall/shutdown/reboot is needed
     shutdown = False
     for param in ("DoUninstall", "DoShutdown", "DoReboot"):
       if params.get_bool(param):
@@ -193,13 +195,14 @@ def main() -> None:
   if os.getenv("PREPAREONLY") is not None:
     return
 
+  # SystemExit on sigterm
   signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(1))
 
   try:
     manager_thread()
   except Exception:
     traceback.print_exc()
-    sentry.capture_exception()
+    cloudlog.exception("crash")
   finally:
     manager_cleanup()
 
@@ -231,6 +234,7 @@ if __name__ == "__main__":
     except Exception:
       pass
 
+    # Show last 3 lines of traceback
     error = traceback.format_exc(-3)
     error = "Manager failed to start\n\n" + error
     with TextWindow(error) as t:
@@ -238,4 +242,5 @@ if __name__ == "__main__":
 
     raise
 
+  # manual exit because we are forked
   sys.exit(0)

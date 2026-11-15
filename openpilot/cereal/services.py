@@ -25,9 +25,10 @@ _services: dict[str, tuple] = {
   "accelerometer": (True, 104., 104),
   "temperatureSensor": (True, 2., 200),
   "deviceState": (True, 2., 1),
-  "chestnutState": (True, 10., 10),
+  "chestnutState": (True, 10., 1),
+  "chestnutGpuState": (False, 10.),
   "touch": (True, 20., 1),
-  "can": (True, 100., 2053, QueueSize.BIG),
+  "can": (True, 100., 2053, QueueSize.BIG),  # decimation gives ~3 msgs in a full segment
   "controlsState": (True, 100., 10, QueueSize.MEDIUM),
   "selfdriveState": (True, 100., 10),
   "pandaStates": (True, 10., 1),
@@ -51,6 +52,8 @@ _services: dict[str, tuple] = {
   "procLog": (True, 0.5, 15, QueueSize.BIG),
   "gpsLocationExternal": (True, 10., 10),
   "gpsLocation": (True, 1., 1),
+  "navInstruction": (True, 1., 10),
+  "navRoute": (True, 0.),
   "ubloxGnss": (True, 10.),
   "qcomGnss": (True, 2.),
   "clocks": (True, 0.1, 1),
@@ -91,7 +94,7 @@ _services: dict[str, tuple] = {
   "carControlSP": (True, 100., 10),
   "carStateSP": (True, 100., 10),
   "liveMapDataSP": (True, 1., 1),
-  "modelDataV2SP": (True, 20., None, QueueSize.BIG),
+  "modelDataV2SP": (True, 20., 10, QueueSize.BIG),
   "liveLocationKalman": (True, 20.),
 
   # debug
@@ -105,7 +108,6 @@ _services: dict[str, tuple] = {
   "livestreamNarrowRoadEncodeData": (False, 20., None, QueueSize.MEDIUM),
   "livestreamCabinEncodeData": (False, 20., None, QueueSize.MEDIUM),
   "customReservedRawData0": (True, 0.),
-  "customReserved19": (True, 4., 1),
 }
 SERVICE_LIST = {name: Service(*vals) for
                 idx, (name, vals) in enumerate(_services.items())}
