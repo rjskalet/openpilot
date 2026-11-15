@@ -9,6 +9,8 @@ from unittest import mock
 
 import pytest
 
+from openpilot.sunnypilot.modeld_v2.tests.test_blendful import frame as blendful_frame
+
 from openpilot.cereal import log
 from openpilot.sunnypilot.modeld_v2.model_settings import BIG_MODEL_LAT_SMOOTH_SECONDS, PARAMS_FRAMES, ModelSettings
 
@@ -30,11 +32,27 @@ def _params(values: dict):
 class TestModelSettings:
   def test_refresh_reads_params_every_params_frames(self):
     settings, model = ModelSettings(), SimpleNamespace(lat_delay=0.0)
-    params = _params({"Blendful": True, "CameraOffset": 0.1, "LagdToggle": True})
+    params = _params({"Blendful": True, "BlendfulIntegrationValidated": True, "CameraOffset": 0.1, "LagdToggle": True})
     assert not settings.refresh(_sm(PARAMS_FRAMES - 1), params, model)
     assert (model.lat_delay, settings.blendful_enabled) == (0.0, False)
     assert settings.refresh(_sm(PARAMS_FRAMES), params, model)
     assert (model.lat_delay, settings.blendful_enabled, settings.camera_offset.camera_offset) == (0.2, True, 0.1)
+
+  def test_stale_blendful_setting_is_locked_out(self):
+    settings = ModelSettings()
+    model = SimpleNamespace(lat_delay=0.0)
+    settings.refresh(_sm(0), _params({"Blendful": True}), model)
+    assert not settings.blendful_enabled
+    assert settings.blendful_callback(blendful_frame(), 20.0, log.Desire.none, log.LaneChangeState.off)(0.) == 0.
+
+  def test_invalid_geometry_disables_blendful_instead_of_crashing(self):
+    settings = ModelSettings()
+    settings.blendful_enabled = True
+    assert settings.blendful_callback({}, 20.0, log.Desire.none, log.LaneChangeState.off)(0.001) == 0.
+    bad = blendful_frame()
+    bad["lane_lines"][0, 1, 0, 0] = float("nan")
+    assert settings.blendful_callback(bad, 20.0, log.Desire.none, log.LaneChangeState.off)(0.001) == 0.
+    assert settings.blendful_callback(blendful_frame(), 20.0, log.Desire.none, log.LaneChangeState.off)(float("nan")) == 0.
 
   def test_fixed_steer_delay_is_used(self):
     settings, model = ModelSettings(), SimpleNamespace(lat_delay=0.0)
@@ -45,10 +63,11 @@ class TestModelSettings:
     settings = ModelSettings()
     settings.blendful.update = mock.Mock(return_value=0.0)
     settings.blendful_enabled = True
+    model_output = blendful_frame()
     for desire, lane_change, active in ((log.Desire.none, log.LaneChangeState.off, True),
                                         (log.Desire.laneChangeLeft, log.LaneChangeState.laneChangeStarting, False)):
-      settings.blendful_callback({}, 20.0, desire, lane_change)(0.001)
-      settings.blendful.update.assert_called_with({}, 20.0, active, 0.001, enabled=True)
+      settings.blendful_callback(model_output, 20.0, desire, lane_change)(0.001)
+      settings.blendful.update.assert_called_with(model_output, 20.0, active, 0.001, enabled=True)
 
   def test_big_model_smoothing_reads_its_param(self):
     settings, model = ModelSettings(), SimpleNamespace(lat_delay=0.0)

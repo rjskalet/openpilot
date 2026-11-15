@@ -5,7 +5,7 @@ This file is part of zoompilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
 from collections.abc import Callable
-from functools import partial
+import numpy as np
 
 from openpilot.cereal import log
 from openpilot.common.params import Params
@@ -37,7 +37,8 @@ class ModelSettings:
       return False
     model.lat_delay = get_lat_delay(params, sm["lateralDelay"].lateralDelay)
     self.camera_offset.set_offset(params.get("CameraOffset", return_default=True))
-    self.blendful_enabled = params.get_bool("Blendful")
+    # A stale Blendful=true from a previous installation must not activate an unvalidated migration.
+    self.blendful_enabled = params.get_bool("Blendful") and params.get_bool("BlendfulIntegrationValidated")
     self.big_model_smoothing = params.get_bool("BigModelSmoothing")
     return True
 
@@ -58,9 +59,29 @@ class ModelSettings:
     if seconds > 0.0:
       action.desiredCurvature = float(smooth_value(action.desiredCurvature, prev_action.desiredCurvature, seconds))
 
+  @staticmethod
+  def _blendful_inputs_valid(model_output, v_ego: float) -> bool:
+    """Fail safely if action-only or fallback models lack complete finite lane/plan geometry."""
+    if not np.isfinite(v_ego):
+      return False
+    for key, shape in {"lane_lines": (1, 4, 33, 2), "lane_lines_stds": (1, 4, 33, 2),
+                       "lane_lines_prob": (1, 8)}.items():
+      arr = model_output.get(key)
+      if not isinstance(arr, np.ndarray) or arr.shape != shape or not np.all(np.isfinite(arr)):
+        return False
+    plan = model_output.get("plan")
+    return bool(isinstance(plan, np.ndarray) and plan.ndim == 3 and plan.shape[0] == 1
+                and plan.shape[1] >= 33 and plan.shape[2] >= 2
+                and np.all(np.isfinite(plan)) and np.all(np.diff(plan[0, :, 0]) >= 0))
+
   def blendful_callback(self, model_output, v_ego: float, desire, lane_change_state) -> Callable[[float], float]:
     active = desire == log.Desire.none and lane_change_state == log.LaneChangeState.off
-    return partial(self.blendful.update, model_output, v_ego, active, enabled=self.blendful_enabled)
+    enabled = self.blendful_enabled and self._blendful_inputs_valid(model_output, v_ego)
+    def correction(model_curvature: float) -> float:
+      finite = bool(np.isfinite(model_curvature))
+      return self.blendful.update(model_output, v_ego, active, float(model_curvature) if finite else 0.0,
+                                 enabled=enabled and finite)
+    return correction
 
 
 def with_blendful(get_action_from_model, min_lat_control_speed: float):
