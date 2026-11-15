@@ -19,6 +19,8 @@ Current SunnyPilot **already includes** Blendful implementation, Cap'n Proto fie
 ## Stage 2: custom torque stack reintroduced under a fail-closed gate
 - Reintroduced our v2 torque controller, derivative schedule, center-chatter deadzone and steering-limit classifier, speed-binned live torque learning, vehicle-specific caches, and `CustomReserved19` telemetry schema/service.
 - `FleetTorqueIntegrationValidated` defaults to **false**. Stored old toggle values alone cannot turn on v2 or speed-dependent torque updates; new controller/learner activation requires explicit validation.
+- Ported the torque estimator integration, preserving SunnyPilot's normal global learning when the gate is off. Vehicle-specific caches and legacy-cache migration activate only after the gate has been explicitly validated.
+- Ported offroad Mazda/Suburban tuning initialization behind the gate, and donor EPS tune normalization after the latest SunnyPilot torque tune is configured.
 - Keep the original measured Suburban `SuburbanFactorFloorScale` knob but at its neutral 1.0 setting; do not ship PR #21's experimental U-floor tune.
 - The controller stack is staged for CI; it is **not** yet certified in newest SunnyPilot.
 
