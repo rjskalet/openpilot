@@ -2,8 +2,6 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import pytest
-
 from opendbc.car.mazda.values import MazdaFlags
 from openpilot.sunnypilot.fleet_validation import feature_validated, fleet_vehicle, running_revision
 
@@ -44,13 +42,13 @@ def test_revision_and_vehicle_pair_must_match():
     assert not feature_validated(params, cp("gm", SUBURBAN), "FleetTorque")
 
 
-@pytest.mark.parametrize("commit,dirty", [("unknown", False), (COMMIT, True), ("a" * 12, False)])
-def test_untrusted_build_identity_cannot_validate(commit, dirty):
-  metadata = SimpleNamespace(openpilot=SimpleNamespace(git_commit=commit, is_dirty=dirty))
-  running_revision.cache_clear()
-  with patch("openpilot.sunnypilot.fleet_validation.get_build_metadata", return_value=metadata):
-    assert running_revision() == ""
-  running_revision.cache_clear()
+def test_untrusted_build_identity_cannot_validate():
+  for commit, dirty in (("unknown", False), (COMMIT, True), ("a" * 12, False)):
+    metadata = SimpleNamespace(openpilot=SimpleNamespace(git_commit=commit, is_dirty=dirty))
+    running_revision.cache_clear()
+    with patch("openpilot.sunnypilot.fleet_validation.get_build_metadata", return_value=metadata):
+      assert running_revision() == ""
+    running_revision.cache_clear()
 
 
 def test_clean_full_git_sha_identifies_current_build():

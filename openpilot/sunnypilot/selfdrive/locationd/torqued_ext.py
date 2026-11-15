@@ -15,6 +15,7 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
 from openpilot.common.swaglog import cloudlog
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
+from openpilot.sunnypilot.fleet_validation import feature_validated
 
 RELAXED_MIN_BUCKET_POINTS = np.array([1, 200, 300, 500, 500, 300, 200, 1])
 
@@ -123,7 +124,6 @@ class TorqueEstimatorExt:
     from openpilot.selfdrive.locationd.torqued import TorqueBuckets, STEER_BUCKET_BOUNDS, \
       POINTS_PER_BUCKET, MIN_FILTER_DECAY
     from opendbc.sunnypilot.car.interfaces import get_speed_dep_config_for_car
-from openpilot.sunnypilot.fleet_validation import feature_validated
 
     cfg = get_speed_dep_config_for_car(self.CP)
     self.speed_dep_seed_version = int(cfg.get('seed_version', 0))

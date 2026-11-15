@@ -17,7 +17,6 @@ from openpilot.sunnypilot.selfdrive.controls.lib.nnlc.helpers import get_nn_mode
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.helpers import set_speed_limit_assist_availability
 
 from openpilot.sunnypilot.sunnylink.statsd import STATSLOGSP
-import openpilot.system.sentry as sentry
 
 
 MAZDA_STEER_TO_ZERO_TORQUE_TUNE = 2.0
@@ -25,10 +24,9 @@ SUBURBAN_LIVE_TABLE_FINGERPRINT = "CHEVROLET_SUBURBAN_CAMERA_11TH_GEN"
 
 
 def log_fingerprint(CP: structs.CarParams) -> None:
-  if CP.carFingerprint == "MOCK":
-    sentry.capture_fingerprint_mock()
-  else:
-    sentry.capture_fingerprint(CP.carFingerprint, CP.brand)
+  # The old sentry integration was removed upstream. Log without importing a
+  # module that no longer exists; this must never prevent car initialization.
+  cloudlog.info("car fingerprint: %s (%s)", CP.carFingerprint, CP.brand)
 
 
 def _seed_mazda_torque_defaults(CP: structs.CarParams, params: Params | None = None) -> None:
