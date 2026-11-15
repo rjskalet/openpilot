@@ -1,6 +1,6 @@
 # Native ZoomPilot/Blendful fleet migration
 
-**Draft only; not an installation package.** The native base is pinned to ZoomPilot `04e8f79413efb9f16ede11014c546324c48377ce`. Companion `rjskalet/opendbc` is pinned to `4866ae928c229ec35e594c3a70e882f3d0992565` based on upstream `936309777989f41ce17b5658113164db879a3d7e`.
+**Draft only; not an installation package.** The native base is pinned to ZoomPilot `04e8f79413efb9f16ede11014c546324c48377ce`. Companion `rjskalet/opendbc` is pinned to `403b6e048d19b6e892fb47a25a0ca7297b79c1f7` based on upstream `936309777989f41ce17b5658113164db879a3d7e`.
 
 ## Architecture
 - Keep ZoomPilot's native modeld, Blendful, `ModelSettings`, big model smoothing, model handoffs, torque tuning and app/UI; no legacy controller cherry-picks.
@@ -13,6 +13,8 @@
 - Safety retesting must include an explicit request for Alpha longitudinal, which must still leave the Suburban on factory ACC and the CX-9 on MRCC.
 
 ## Remaining blockers
+- Automated Suburban CAN fingerprinting is not established by this change; vehicle selection must be verified against real logs, without borrowing a Yukon fingerprint.
+- Native ZoomPilot static analysis currently reports 105 diagnostics under this fork's lint configuration, and process replay plus hardware-specific checks remain unresolved. A passing schema check does not imply the branch is installation-ready.
 - Complete CI and process replay; reconcile all nonzero steering and carParams differences against known-good reference logs.
 - Panda safety tests and car-controller failover behavior on both vehicles.
 - Verify native opendbc gitlink, firmware fingerprinting and car compatibility.
