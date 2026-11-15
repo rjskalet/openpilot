@@ -19,10 +19,22 @@ VEHICLE_EDGE_MARGIN = 1.08
 EDGE_CLEARANCE = 3.7
 
 
+class RoadEdgeMode:
+  # RoadEdgeLaneChangeEnabled was a bool: its stored 0/1 still mean off/audible
+  OFF = 0
+  AUDIBLE = 1
+  SILENT = 2  # blocks and shows the alert, without the chime
+
+
+def read_road_edge_mode(params: Params) -> int:
+  """The clamped mode, the single sanitization point for every consumer."""
+  return min(max(int(params.get("RoadEdgeLaneChangeEnabled") or RoadEdgeMode.OFF), RoadEdgeMode.OFF), RoadEdgeMode.SILENT)
+
+
 class RoadEdgeLaneChangeController:
   def __init__(self):
     self.params = Params()
-    self.enabled = self.params.get_bool("RoadEdgeLaneChangeEnabled")
+    self.read_params()
     self.param_read_counter = 0
     self.left_edge_detected = False
     self.right_edge_detected = False
@@ -32,7 +44,7 @@ class RoadEdgeLaneChangeController:
     self.right_clear_timer = 0.0
 
   def read_params(self) -> None:
-    self.enabled = self.params.get_bool("RoadEdgeLaneChangeEnabled")
+    self.enabled = read_road_edge_mode(self.params) != RoadEdgeMode.OFF
 
   def update_params(self) -> None:
     if self.param_read_counter % 50 == 0:
@@ -54,6 +66,12 @@ class RoadEdgeLaneChangeController:
       self.reset()
       return
 
+    # a model bundle that doesn't emit these outputs provides no edge evidence;
+    # zero-filled defaults would otherwise read as high-confidence edges on both sides
+    if len(road_edge_stds) < 2 or len(lane_line_probs) < 4:
+      self.reset()
+      return
+
     left_edge_prob = np.clip(1.0 - road_edge_stds[0], 0.0, 1.0)
     right_edge_prob = np.clip(1.0 - road_edge_stds[1], 0.0, 1.0)
     left_lane_prob = lane_line_probs[0]
@@ -63,8 +81,10 @@ class RoadEdgeLaneChangeController:
       left_clearance = abs(road_edges[0].y[0]) - VEHICLE_EDGE_MARGIN
       right_clearance = abs(road_edges[1].y[0]) - VEHICLE_EDGE_MARGIN
     else:
-      left_clearance = 0.0
-      right_clearance = 0.0
+      # missing edge geometry: proximity cannot be confirmed, so it must not count as near
+      # (this also blocks manual nudge lane changes, so never block on absent data)
+      left_clearance = float('inf')
+      right_clearance = float('inf')
 
     left_cond = left_edge_prob > EDGE_PROB and left_lane_prob < NEARSIDE_PROB and left_clearance < EDGE_CLEARANCE
     right_cond = right_edge_prob > EDGE_PROB and right_lane_prob < NEARSIDE_PROB and right_clearance < EDGE_CLEARANCE

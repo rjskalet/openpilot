@@ -28,27 +28,13 @@ sections:
     title: Joystick Debug Mode
     enablement:
     - $ref: '#/macros/offroad'
-  - key: AlphaLongitudinalEnabled
+  - key: NavigationEnabled
     widget: toggle
-    needs_onroad_cycle: true
-    title: sunnypilot Longitudinal Control (Alpha)
-    description: 'WARNING: sunnypilot longitudinal control is in alpha for this car and will disable Automatic Emergency Braking
-      (AEB). On this car, sunnypilot defaults to the car''s built-in ACC instead of sunnypilot''s longitudinal control. Enable
-      this to switch to sunnypilot longitudinal control. Enabling Experimental mode is recommended when enabling sunnypilot
-      longitudinal control alpha. Changing this setting will restart sunnypilot if the car is powered on.'
+    title: Navigation (Alpha)
+    description: Turn-by-turn navigation with a route map. Set a destination from comma connect.
     visibility:
-    - type: all
-      conditions:
-      - type: capability
-        field: alpha_long_available
-        equals: true
-      - type: not
-        condition:
-          type: capability
-          field: has_icbm
-          equals: true
-    enablement:
-    - $ref: '#/macros/not_engaged'
+    - {type: capability, field: device_type, equals: mici}
+    - $ref: '#/macros/release_branches_hide'
   - key: ShowDebugInfo
     widget: toggle
     title: UI Debug Mode

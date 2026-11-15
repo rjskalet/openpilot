@@ -5,16 +5,12 @@ This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
 import numpy as np
-from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 from openpilot.cereal import log, messaging
 from opendbc.car.structs import car
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.honda.values import CAR as HONDA
-from opendbc.car.mazda.values import CAR as MAZDA, CarControllerParams as MazdaControllerParams, MazdaFlags
 from opendbc.car.vehicle_model import VehicleModel
-from opendbc.sunnypilot.car.interfaces import get_tune_scale
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.car.helpers import convert_to_capnp
@@ -22,8 +18,6 @@ from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
 from openpilot.selfdrive.locationd.helpers import Pose
 from openpilot.common.mock.generators import generate_deviceMotion
 from openpilot.sunnypilot.selfdrive.car import interfaces as sunnypilot_interfaces
-from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_ext import LatControlTorqueExt
-from openpilot.sunnypilot.selfdrive.controls.lib.latcontrol_torque_ext_override import LatControlTorqueExtOverride
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.common.test import OpenpilotTestCase
 
@@ -114,119 +108,60 @@ class TestLatControlTorqueExt(OpenpilotTestCase):
     output_torque, _, pid_log = _run_update(controller, VM)
     assert pid_log.active
 
+  def test_jerk_aware_pid_limits_survive_param_resets(self):
+    """Every update_limits path (live params, per-frame speed-dep override) must re-assert the
+    torque-space +-steer_max limits, or the torque-space PID runs with lat-accel-space bounds
+    (~latAccelFactor times too wide) and the integrator can wind up past full-scale torque."""
+    controller, VM, _ = _make_controller(enhanced=True, nnlc=False)
+    assert controller.pid.pos_limit == controller.steer_max
 
-class TestMazdaSpeedDependentTorque(OpenpilotTestCase):
-  @staticmethod
-  def make_extension():
-    cp = car.CarParams(brand="mazda", carFingerprint=str(MAZDA.MAZDA_CX9),
-                       flags=int(MazdaFlags.STEER_TO_ZERO_EPS), minSteerSpeed=0.0)
-    cp.lateralTuning.init('torque')
-    cp.lateralTuning.torque.latAccelFactor = 9.9
-    cp.lateralTuning.torque.latAccelOffset = 0.03
-    cp.lateralTuning.torque.friction = 0.44
+    controller.update_torque_parameters(2.5, 0.1, 0.15)
+    assert controller.pid.pos_limit == controller.steer_max
 
-    ext = LatControlTorqueExt.__new__(LatControlTorqueExt)
-    ext.CP = cp
-    ext.lac_torque = SimpleNamespace(
-      torque_params=SimpleNamespace(latAccelFactor=0.0, latAccelOffset=0.0, friction=0.0),
-      update_limits=MagicMock(),
-    )
-    ext.enforce_torque_control_toggle = False
-    ext.torque_override_enabled = False
-    ext.frame = -1
-    ext._speed_dep_active = False
-    ext._speed_dep_speed_bp = []
-    ext._speed_dep_lat_accel_factor_bp = []
-    ext._speed_dep_friction_bp = []
-    ext._speed_dep_car_cfg = None
-    ext._last_vego = 0.0
-    ext.steer_rail_schedule = None
-    return ext
-
-  def test_invalid_live_bin_uses_current_mazda_seed_and_interpolates(self):
-    ext = self.make_extension()
-    tp = SimpleNamespace(useParams=True, latAccelFactorFiltered=3.1, latAccelOffsetFiltered=0.02,
-                         frictionCoefficientFiltered=0.2)
-    tp_sp = SimpleNamespace(
-      speedBinCenters=[6.5, 9.5, 12.0, 16.4, 21.0, 28.0, 35.0],
-      speedBinLatAccelFactors=[3.0] * 7,
-      speedBinFrictions=[0.2] * 7,
-      speedBinValid=[True, False, True, True, True, True, True],
-    )
-
-    ext.update_speed_dep_torque(tp, tp_sp)
-
-    assert ext._speed_dep_active is True
-    assert ext._speed_dep_lat_accel_factor_bp[1] == 2.70
-    assert ext._speed_dep_friction_bp[1] == 0.154
-    assert ext.lac_torque.torque_params.latAccelFactor == 3.1
-    assert ext.lac_torque.torque_params.latAccelOffset == 0.02
-    assert ext.lac_torque.torque_params.friction == 0.2
-
-    ext._last_vego = 9.5
-    assert ext.update_override_torque_params(ext.lac_torque.torque_params) is True
-    assert np.isclose(ext.lac_torque.torque_params.latAccelFactor, np.float32(2.70))
-    assert np.isclose(ext.lac_torque.torque_params.friction, np.float32(0.154))
-
-  def test_unavailable_live_data_restores_offline_tune(self):
-    ext = self.make_extension()
+    ext = controller.extension
     ext._speed_dep_active = True
-    tp = SimpleNamespace(useParams=False)
+    ext._speed_dep_speed_bp = [5.0, 30.0]
+    ext._speed_dep_lat_accel_factor_bp = [2.0, 1.2]
+    ext._speed_dep_friction_bp = [0.15, 0.1]
+    _run_update(controller, VM)
+    assert controller.pid.pos_limit == controller.steer_max
+    assert controller.pid.neg_limit == -controller.steer_max
 
-    ext.update_speed_dep_torque(tp, None)
+  def test_stock_limits_when_extension_inactive(self):
+    controller, VM, _ = _make_controller(enhanced=False, nnlc=False)
+    expected = controller.lateral_accel_from_torque(controller.steer_max, controller.torque_params)
+    assert controller.pid.pos_limit == expected
+    _run_update(controller, VM)
+    assert controller.pid.pos_limit == expected
 
-    assert ext._speed_dep_active is False
-    assert ext.lac_torque.torque_params.latAccelFactor == ext.CP.lateralTuning.torque.latAccelFactor
-    assert ext.lac_torque.torque_params.latAccelOffset == ext.CP.lateralTuning.torque.latAccelOffset
-    assert ext.lac_torque.torque_params.friction == ext.CP.lateralTuning.torque.friction
-    ext.lac_torque.update_limits.assert_called_once()
+  def test_single_pid_update_per_frame(self):
+    """When the extension overrides the output, the stock lat-accel-space pid.update must be
+    skipped: both updates hit the same integrator, and the lat-accel error is latAccelFactor
+    times the torque-space error, so double updating scales effective ki by (1 + latAccelFactor)."""
+    def counting_update(calls, orig):
+      def wrapped(*a, **kw):
+        calls.append(1)
+        return orig(*a, **kw)
+      return wrapped
 
-  def test_donor_nnlc_scale_preserves_wire_counts(self):
-    cp = car.CarParams(brand="mazda", carFingerprint=str(MAZDA.MAZDA_CX9),
-                       flags=int(MazdaFlags.STEER_TO_ZERO_EPS))
-    tune_scale = get_tune_scale(cp)
-    assert tune_scale == 1.5
+    for enhanced, expected_calls in [(True, 1), (False, 1)]:
+      controller, VM, _ = _make_controller(enhanced=enhanced, nnlc=False)
+      calls: list[int] = []
+      controller.pid.update = counting_update(calls, controller.pid.update)
+      _run_update(controller, VM)
+      assert len(calls) == expected_calls, f"enhanced={enhanced}: {len(calls)} pid updates"
 
-    for nn_torque in (-1.0, -0.4, 0.0, 0.4, 1.0):
-      old_counts = nn_torque * MazdaControllerParams.TUNE_STEER_MAX
-      new_counts = (nn_torque / tune_scale) * MazdaControllerParams.EPS_STEER_MAX
-      assert np.isclose(old_counts, new_counts)
+  def test_jerk_aware_ff_subtracts_lat_accel_offset(self):
+    """torqued fits lat_accel = latAccelFactor * torque + latAccelOffset; the torque-space
+    feedforward must invert that fit like the stock controller's `ff -= latAccelOffset`."""
+    controller, VM, _ = _make_controller(enhanced=True, nnlc=False)
+    _run_update(controller, VM)
+    ff_no_offset = controller.extension._ff
 
-  def test_donor_manual_override_converts_from_upstream_scale(self):
-    params = Params()
-    params.put_bool("EnforceTorqueControl", True, block=True)
-    params.put_bool("TorqueParamsOverrideEnabled", True, block=True)
-    params.put("TorqueParamsOverrideLatAccelFactor", 4.2, block=True)
-    params.put("TorqueParamsOverrideFriction", 0.3, block=True)
+    offset = 0.5
+    controller.torque_params.latAccelOffset = offset
+    _run_update(controller, VM)
+    ff_with_offset = controller.extension._ff
 
-    cp = car.CarParams(brand="mazda", carFingerprint=str(MAZDA.MAZDA_CX9),
-                       flags=int(MazdaFlags.STEER_TO_ZERO_EPS))
-    ext = LatControlTorqueExtOverride(cp)
-    torque_params = SimpleNamespace(latAccelFactor=0.0, friction=0.0)
-
-    assert ext.update_override_torque_params(torque_params) is True
-    assert np.isclose(torque_params.latAccelFactor, 6.3)
-    assert np.isclose(torque_params.friction, 0.2)
-
-  def test_manual_override_takes_precedence_over_speed_bins(self):
-    params = Params()
-    params.put_bool("EnforceTorqueControl", True, block=True)
-    params.put_bool("TorqueParamsOverrideEnabled", True, block=True)
-    params.put("TorqueParamsOverrideLatAccelFactor", 4.2, block=True)
-    params.put("TorqueParamsOverrideFriction", 0.3, block=True)
-
-    ext = LatControlTorqueExtOverride(car.CarParams())
-    ext._speed_dep_active = True
-    ext._speed_dep_speed_bp = [0.0, 30.0]
-    ext._speed_dep_lat_accel_factor_bp = [1.0, 2.0]
-    ext._speed_dep_friction_bp = [0.1, 0.2]
-    ext._last_vego = 15.0
-    torque_params = SimpleNamespace(latAccelFactor=0.0, friction=0.0)
-
-    assert ext.update_override_torque_params(torque_params) is True
-    assert torque_params.latAccelFactor == 4.2
-    assert torque_params.friction == 0.3
-
-    assert ext.update_override_torque_params(torque_params) is False
-    assert torque_params.latAccelFactor == 4.2
-    assert torque_params.friction == 0.3
+    expected_delta = -offset / controller.torque_params.latAccelFactor
+    assert abs((ff_with_offset - ff_no_offset) - expected_delta) < 1e-6

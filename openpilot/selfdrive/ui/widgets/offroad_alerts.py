@@ -1,4 +1,4 @@
-import pyray as rl
+import raylib_nb as rl
 from enum import IntEnum
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -21,7 +21,6 @@ class AlertColors:
   BACKGROUND = rl.Color(57, 57, 57, 255)
   BUTTON = rl.WHITE
   BUTTON_PRESSED = rl.Color(200, 200, 200, 255)
-  BUTTON_TEXT = rl.BLACK
   SNOOZE_BG = rl.Color(79, 79, 79, 255)
   SNOOZE_BG_PRESSED = rl.Color(100, 100, 100, 255)
   TEXT = rl.WHITE
@@ -263,6 +262,8 @@ class OffroadAlert(AbstractAlert):
   def _build_alerts(self):
     self.sorted_alerts = []
     for key, config in sorted(OFFROAD_ALERTS.items(), key=lambda x: x[1].get("severity", 0), reverse=True):
+      if key == "Offroad_Pairing":
+        continue
       severity = config.get("severity", 0)
       alert_data = AlertData(key=key, text="", severity=severity)
       self.sorted_alerts.append(alert_data)

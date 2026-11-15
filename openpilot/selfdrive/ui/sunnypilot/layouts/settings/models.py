@@ -6,14 +6,17 @@ See the LICENSE.md file in the root directory for more details.
 """
 import re
 import time
-import pyray as rl
+import raylib_nb as rl
 
 from openpilot.cereal import custom
 from openpilot.sunnypilot.models.helpers import ACTIVE_BUNDLE_KEYS, get_selected_bundle, resolve_bundle_by_ref
 from openpilot.common.constants import CV
 from openpilot.selfdrive.ui.ui_state import device, ui_state
+from openpilot.selfdrive.ui.sunnypilot.accelerator_link import LINK_MODE_TITLES, big_model_note, link_mode, link_status, \
+  link_toggle_meaningful, standin_model
 from openpilot.selfdrive.ui.sunnypilot.model_info import (big_model_state, bundles_for_source, carrying_model, default_model_name,
                                                            model_cache_size_mb, queued_name, refresh_in_progress, refresh_model_list)
+from openpilot.sunnypilot.jetlink_adapter import KEYS, MODES
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.widgets import DialogResult, Widget
@@ -22,8 +25,9 @@ from openpilot.system.ui.widgets.scroller_tici import Scroller
 from openpilot.system.ui.widgets.toggle import ON_COLOR
 
 from openpilot.system.ui.sunnypilot.lib.styles import style
+from openpilot.system.ui.sunnypilot.lib.switch import Switch
 from openpilot.system.ui.sunnypilot.lib.utils import NoElideButtonAction, ScrollingButtonAction
-from openpilot.system.ui.sunnypilot.widgets.list_view import ListItemSP, toggle_item_sp, option_item_sp
+from openpilot.system.ui.sunnypilot.widgets.list_view import ListItemSP, option_item_sp, multiple_button_item_sp
 from openpilot.system.ui.sunnypilot.widgets.download_status import download_status_item
 from openpilot.system.ui.sunnypilot.widgets.tree_dialog import TreeOptionDialog, TreeNode, TreeFolder
 
@@ -43,13 +47,12 @@ class ModelsLayout(Widget):
     self._refreshing = False
     self._refresh_start: float | None = None
     self._last_note = None
+    self._link_status = None
     self.last_cache_calc_time = 0
 
     self._initialize_items()
 
     self.clear_cache_item.action_item.set_value(f"{self.calculate_cache_size():.2f} MB")
-    for ctrl, key in [(self.lane_turn_value_control, "LaneTurnValue"), (self.delay_control, "LagdToggleDelay"), (self.camera_offset, "CameraOffset")]:
-      ctrl.action_item.set_value(int(float(ui_state.params.get(key, return_default=True)) * 100))
 
     self._scroller = Scroller(self.items, line_separator=True, spacing=0)
 
@@ -66,6 +69,14 @@ class ModelsLayout(Widget):
       action_item=ScrollingButtonAction(tr("SELECT")),
       callback=lambda: self._open_source_dialog("chestnut")
     )
+
+    # param-bound; disabled onroad in _refresh_accelerator_items, since the
+    # gadget changes only once the car is parked
+    self.accelerator_link_item = multiple_button_item_sp(
+      tr("Jetlink"),
+      self._link_description(""),
+      buttons=[lambda m=m: tr(LINK_MODE_TITLES[m]) for m in MODES],
+      param=KEYS.link, button_width=300, inline=False)
 
     self.download_item = download_status_item(lambda: tr("Download") if self._downloading else tr("Model Status"))
 
@@ -84,42 +95,68 @@ class ModelsLayout(Widget):
                                             tr("Cancel"), "",
                                             lambda: ui_state.params.remove("ModelManager_DownloadRef"))
 
-    self.lane_turn_value_control = option_item_sp(tr("Adjust Lane Turn Speed"), "LaneTurnValue", 500, 2000,
-                                                  tr("Set the maximum speed for lane turn desires. Default is 19 mph."),
+    # zoompilot: LaneTurnDesire is the step below the slowest speed, LagdToggle the step below the shortest delay
+    self.lane_turn_value_control = option_item_sp(tr("Lane Turn Desires"), "LaneTurnValue", 500, 2000,
+                                                  tr("With your blinker on at or below this speed, the car plans a turn in that direction at the " +
+                                                     "nearest drivable path. This prevents situations (like at red lights) where the car might plan " +
+                                                     "the wrong turn direction. Default is 19 mph."),
                                                   int(round(100 / CV.MPH_TO_KPH)), None, True, "", style.BUTTON_ACTION_WIDTH, None, True,
                                                   lambda v: f"{int(round(v / 100 * (CV.MPH_TO_KPH if ui_state.is_metric else 1)))}" +
-                                                            f" {'km/h' if ui_state.is_metric else 'mph'}")
+                                                            f" {'km/h' if ui_state.is_metric else 'mph'}",
+                                                  switch=Switch("LaneTurnDesire", False, tr("Off")))
 
-    self.lane_turn_desire_toggle = toggle_item_sp(tr("Use Lane Turn Desires"),
-                                                  tr("If you're driving at 20 mph (32 km/h) or below and have your blinker on," +
-                                                     " the car will plan a turn in that direction at the nearest drivable path. " +
-                                                     "This prevents situations (like at red lights) where the car might plan the wrong turn direction."),
-                                                  param="LaneTurnDesire")
+    self.delay_control = option_item_sp(tr("Steer Delay"), "LagdToggleDelay", 5, 50, "",
+                                        1, None, True, "", style.BUTTON_ACTION_WIDTH, None, True, lambda v: f"{v / 100:.2f}s",
+                                        switch=Switch("LagdToggle", True, tr("Live")))
 
-    self.delay_control = option_item_sp(tr("Adjust Software Delay"), "LagdToggleDelay", 5, 50,
-                                        tr("Adjust the software delay when Live Learning Steer Delay is toggled off. The default software delay value is 0.2"),
-                                        1, None, True, "", style.BUTTON_ACTION_WIDTH, None, True, lambda v: f"{v / 100:.2f}s")
+    blendful_desc = tr("Adds a gentle nudge toward lane center on top of the model's own steering, stronger when lane lines are clear." +
+                       " Yields around obstacles. The center line turns blue as it nudges; Lane Center UI in Visuals adds a gauge.")
+    self.blendful_toggle = multiple_button_item_sp(tr("Lane Center Assist (Alpha)"), blendful_desc,
+                                                   buttons=[tr("Off"), tr("On")], button_width=300,
+                                                   callback=lambda i: ui_state.params.put_bool("Blendful", i == 1, block=True), inline=False)
 
-    self.lagd_toggle = toggle_item_sp(tr("Live Learning Steer Delay"), "", param="LagdToggle")
+    self.big_smoothing_toggle = multiple_button_item_sp(
+      tr("smooth big model"),
+      tr("Gives big models the small models' steering smoothing. Can calm small side-to-side wiggles on straight roads."),
+      buttons=[tr("Off"), tr("On")], button_width=300,
+      callback=lambda i: ui_state.params.put_bool("BigModelSmoothing", i == 1, block=True), inline=False)
 
     self.camera_offset = option_item_sp(tr("Adjust Camera Offset"), "CameraOffset", -35, 35,
                                         tr("Virtually shift camera's perspective to move model's center to Left(+ values) or Right (- values)"),
                                         1, None, True, "", style.BUTTON_ACTION_WIDTH, None, True,
                                         lambda v: f"{v / 100:.2f} m")
 
-    self.items = [self.small_model_item, self.big_model_item, self.cancel_download_item, self.download_item, self.refresh_item, self.clear_cache_item,
-                  self.lane_turn_desire_toggle, self.lane_turn_value_control, self.lagd_toggle, self.delay_control, self.camera_offset]
+    # as the comma 4 panel: jetlink and big model smoothing just before refresh
+    self.items = [self.small_model_item, self.big_model_item, self.cancel_download_item, self.download_item,
+                  self.blendful_toggle, self.lane_turn_value_control, self.delay_control, self.camera_offset,
+                  self.accelerator_link_item, self.big_smoothing_toggle, self.refresh_item, self.clear_cache_item]
+    self._refresh_accelerator_items()
+
+  @staticmethod
+  def _link_description(status: str) -> str:
+    what = tr("Run big models over a connected device running Jetlink. Turns off ADB.")
+    return f"{what} {status}".strip()
+
+  def _refresh_accelerator_items(self):
+    # the setting is a param read, so this rides the half-second tick
+    self.accelerator_link_item.set_visible(link_toggle_meaningful())
+    self.accelerator_link_item.action_item.set_selected_button(MODES.index(link_mode()))
+    self.accelerator_link_item.action_item.set_enabled(ui_state.is_offroad())
+    status = link_status()
+    if status != self._link_status:
+      self._link_status = status
+      self.accelerator_link_item.set_description(self._link_description(status))
 
   def _update_lagd_description(self, lagd_toggle: bool):
-    desc = tr("Enable this for the car to learn and adapt its steering response time. Disable to use a fixed steering response time. " +
-              "Keeping this on provides the stock openpilot experience.")
+    desc = tr("Live learns your car's steering response time as you drive, the stock openpilot experience. " +
+              "A number is a fixed software delay instead. Default is Live.")
     if lagd_toggle:
       desc += f"<br>{tr('Live Steer Delay:')} {ui_state.sm['lateralDelay'].lateralDelay:.3f} s"
     elif ui_state.CP is not None:
       sw = float(ui_state.params.get("LagdToggleDelay", return_default=True))
       cp = ui_state.CP.steerActuatorDelay
       desc += f"<br>{tr('Actuator Delay:')} {cp:.2f} s + {tr('Software Delay:')} {sw:.2f} s = {tr('Total Delay:')} {cp + sw:.2f} s"
-    self.lagd_toggle.set_description(desc)
+    self.delay_control.set_description(desc)
 
   @staticmethod
   def calculate_cache_size():
@@ -150,6 +187,7 @@ class ModelsLayout(Widget):
     elif (current_time := time.monotonic()) - self.last_cache_calc_time > 0.5:
       self.last_cache_calc_time = current_time
       self.clear_cache_item.action_item.set_value(f"{self.calculate_cache_size():.2f} MB")
+      self._refresh_accelerator_items()
 
     bundle = self.model_manager.selectedBundle if self.model_manager else None
     progresses = [model.artifact.downloadProgress for model in bundle.models if model.artifact.fileName] if bundle else []
@@ -205,16 +243,28 @@ class ModelsLayout(Widget):
       item.set_description("")
 
   def _status_note(self) -> str:
-    """The failover story for the Model Status row. One-way big -> small, and the
-    fallback is runner-matched: a Default big can only fall back to the Default
-    small (stock modeld), a custom big has no automatic fallback yet."""
-    if not ui_state.chestnut_present:
+    """The failover story for the Model Status row. A chestnut's is one-way big ->
+    small and runner-matched: a Default big can only fall back to the Default
+    small (stock modeld), a custom big has no automatic fallback yet.
+    Jetlink's goes both ways, all drive."""
+    view = ui_state.jetlink_view
+    accelerator = view is not None
+    if not (ui_state.chestnut_present or accelerator):
       return ""
-    big_bundle = get_selected_bundle(ui_state.params, "chestnut")
-    big_name = big_bundle.internalName if big_bundle else default_model_name("chestnut")
-    big_is_default = big_bundle is None
     fallback_name = default_model_name("qcom")
     state = big_model_state()
+    if accelerator:
+      # named by jetlink: the slot's pick, or its default, which can be
+      # newer than the chestnut's. The small model the user picked drives in
+      # its place, so it reads like a Default big
+      big_name = view.model or tr("The big model")
+      big_is_default = True
+      if small := get_selected_bundle(ui_state.params, "qcom"):
+        fallback_name = small.internalName
+    else:
+      big_bundle = get_selected_bundle(ui_state.params, "chestnut")
+      big_name = big_bundle.internalName if big_bundle else default_model_name("chestnut")
+      big_is_default = big_bundle is None
     if state == 'failed':
       if big_is_default:
         return tr("Big model unavailable, {} is driving until the next drive.").format(fallback_name)
@@ -223,6 +273,19 @@ class ModelsLayout(Widget):
       if big_is_default:
         return tr("{} drives until the big model is ready.").format(fallback_name)
       return tr("Getting the big model ready.")
+    if state == 'ready':
+      # the swap window, not the model, is what is missing now: it opens when
+      # nothing is in control
+      return tr("{} is ready. Disengage fully, then re-engage to switch.").format(big_name)
+    if accelerator and not view.ready:
+      if standin := standin_model():
+        # the last model the Jetson built drives until the pick is downloaded and built
+        return tr("{} drives until {} is ready.").format(standin, big_name)
+      return tr("{} will drive when Jetlink is ready.").format(big_name)
+    if accelerator:
+      # it rejoins all drive and a drop is announced as it happens, so there is
+      # no "until the next drive" to warn of
+      return tr("{} will drive.").format(big_name)
     if big_is_default:
       return tr("{} will drive. If it fails during a drive, {} takes over until the next drive.").format(big_name, fallback_name)
     return tr("{} will drive when the chestnut is ready.").format(big_name)
@@ -235,13 +298,17 @@ class ModelsLayout(Widget):
     progress = sum(p.progress for p in progresses) / len(progresses)
     ds = custom.ModelManagerSP.DownloadStatus
 
+    if any(p.canceling for p in progresses):
+      return {"name": name, "downloading": True, "progress": progress, "status_text": tr("canceling...")}
     if ds.failed in statuses:
       # close.png is authored black and a tint cannot lift it, hence close2
       return {"name": name, "status_text": tr("download failed"), "text_color": rl.RED, "icon": "icons/close2.png"}
     if ds.verifying in statuses:
       return {"name": name, "downloading": True, "progress": progress, "status_text": tr("verifying")}
     if ds.downloading in statuses:
-      return {"name": name, "downloading": True, "progress": progress}
+      speed = max((p.speed for p in progresses), default=0.0)
+      status_text = f"{speed / 1024 ** 2:.1f} MB/s" if speed > 0 else "--.- MB/s"
+      return {"name": name, "downloading": True, "progress": progress, "status_text": status_text}
     if statuses <= {ds.downloaded, ds.cached}:
       return {"name": name, "text_color": ON_COLOR, "icon": "icons/checkmark.png"}
     # circled_slash is authored grey; tinting it again only darkens it
@@ -266,10 +333,13 @@ class ModelsLayout(Widget):
     return resolved[0] if resolved else None
 
   @staticmethod
-  def _bundle_to_node(bundle):
-    return TreeNode(bundle.ref, {'display_name': bundle.displayName, 'short_name': bundle.internalName})
+  def _bundle_to_node(bundle, noted: bool = False):
+    # a big model's line says whether the Jetson has built it or the comma has it
+    note = big_model_note(bundle.ref) if noted else None
+    name = f"{bundle.displayName} · {note}" if note else bundle.displayName
+    return TreeNode(bundle.ref, {'display_name': name, 'short_name': bundle.internalName})
 
-  def _get_folders(self, favorites, bundles):
+  def _get_folders(self, favorites, bundles, noted: bool = False):
     folders = {}
     for bundle in bundles:
       folders.setdefault(next((ov_ride.value for ov_ride in bundle.overrides if ov_ride.key == "folder"), ""), []).append(bundle)
@@ -278,10 +348,10 @@ class ModelsLayout(Widget):
     for folder, folder_bundles in sorted(folders.items(), key=lambda x: max((bundle.index for bundle in x[1]), default=-1), reverse=True):
       folder_bundles.sort(key=lambda bundle: bundle.index, reverse=True)
       name = folder + (f" - (Updated: {m.group(1)})" if folder_bundles and (m := re.search(r'\(([^)]*)\)[^(]*$', folder_bundles[0].displayName)) else "")
-      folders_list.append(TreeFolder(name, [self._bundle_to_node(bundle) for bundle in folder_bundles]))
+      folders_list.append(TreeFolder(name, [self._bundle_to_node(bundle, noted) for bundle in folder_bundles]))
 
     if favorites and (fav_bundles := [bundle for bundle in bundles if bundle.ref in favorites]):
-      folders_list.insert(0, TreeFolder("Favorites", [self._bundle_to_node(bundle) for bundle in fav_bundles]))
+      folders_list.insert(0, TreeFolder("Favorites", [self._bundle_to_node(bundle, noted) for bundle in fav_bundles]))
     return folders_list
 
   def _open_source_dialog(self, source):
@@ -301,7 +371,7 @@ class ModelsLayout(Widget):
     if not bundles:
       return []
     folders_list = [TreeFolder("", [TreeNode("Default", {'display_name': default_model_name(source)})])]
-    folders_list.extend(self._get_folders(favorites, bundles))
+    folders_list.extend(self._get_folders(favorites, bundles, noted=source == "chestnut"))
     return folders_list
 
   @staticmethod
@@ -310,19 +380,15 @@ class ModelsLayout(Widget):
     return bundle.ref if bundle else "Default"
 
   def _update_state(self):
-    advanced_controls: bool = ui_state.params.get_bool("ShowAdvancedControls")
-    turn_desire: bool = ui_state.params.get_bool("LaneTurnDesire")
-    live_delay: bool = ui_state.params.get_bool("LagdToggle")
-    camera_offset: bool = ui_state.active_bundle is not None
+    for control in (self.lane_turn_value_control, self.delay_control):
+      control.action_item.refresh()
+    live_delay: bool = self.delay_control.action_item.switched
+    self.blendful_toggle.action_item.set_selected_button(int(ui_state.params.get_bool("Blendful")))
+    self.big_smoothing_toggle.action_item.set_selected_button(int(ui_state.params.get_bool("BigModelSmoothing")))
 
-    self.lane_turn_desire_toggle.action_item.set_state(turn_desire)
-    self.lane_turn_value_control.set_visible(turn_desire and advanced_controls)
-    self.lagd_toggle.action_item.set_state(live_delay)
-    self.delay_control.set_visible(not live_delay and advanced_controls)
     new_step = int(round(100 / CV.MPH_TO_KPH)) if ui_state.is_metric else 100
     if self.lane_turn_value_control.action_item is not None and self.lane_turn_value_control.action_item.value_change_step != new_step:
       self.lane_turn_value_control.action_item.value_change_step = new_step
-    self.camera_offset.set_visible(camera_offset)
 
     self._update_lagd_description(live_delay)
     self.model_manager = ui_state.sm["modelManagerSP"]
@@ -343,6 +409,7 @@ class ModelsLayout(Widget):
     offroad = ui_state.is_offroad()
     self.small_model_item.action_item.set_enabled(offroad)
     self.big_model_item.action_item.set_enabled(offroad)
+    self.accelerator_link_item.action_item.set_enabled(offroad)
     self.small_model_item.set_description("" if offroad else tr("Only available when vehicle is off, or always offroad mode is on"))
 
     # manager is offroad-only, so an onroad clear would never be serviced

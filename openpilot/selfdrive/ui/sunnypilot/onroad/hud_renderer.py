@@ -4,11 +4,15 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
-import pyray as rl
+import raylib_nb as rl
 
 from openpilot.common.constants import CV
-from openpilot.selfdrive.ui.mici.onroad.torque_bar import TorqueBar
+from openpilot.selfdrive.ui import UI_BORDER_SIZE
+from openpilot.selfdrive.ui.sunnypilot.onroad.blendful_zp import TorqueBarZP
 from openpilot.selfdrive.ui.sunnypilot.onroad.developer_ui import DeveloperUiRenderer, DeveloperUiState, get_bottom_dev_ui_offset
+from openpilot.selfdrive.ui.sunnypilot.onroad.confidence_ball import ConfidenceBallTizi
+from openpilot.selfdrive.ui.sunnypilot.onroad.long_indicator import LongIndicatorTizi
+from openpilot.selfdrive.ui.sunnypilot.onroad.speed_assist_button import SpeedAssistButton
 from openpilot.selfdrive.ui.sunnypilot.onroad.road_name import RoadNameRenderer
 from openpilot.selfdrive.ui.sunnypilot.onroad.rocket_fuel import RocketFuel
 from openpilot.selfdrive.ui.sunnypilot.onroad.speed_limit import SpeedLimitRenderer
@@ -24,6 +28,9 @@ from openpilot.system.ui.lib.text_measure import measure_text_cached
 
 SLA_ACTIVE_COLOR = rl.Color(0x91, 0x9b, 0x95, 0xff)
 
+# the experimental mode button's place, as upstream drew it before retiring chill mode
+EXP_BUTTON_SIZE = 192
+
 
 class HudRendererSP(HudRenderer):
   def __init__(self):
@@ -36,7 +43,11 @@ class HudRendererSP(HudRenderer):
     self.turn_signal_controller = TurnSignalController()
     self.circular_alerts_renderer = CircularAlertsRenderer()
     self.speed_renderer = SpeedRenderer()
-    self._torque_bar = TorqueBar(scale=3.0, always=True)
+    self._torque_bar = TorqueBarZP(scale=3.0, always=True, show_bar=lambda: ui_state.torque_bar,
+                                   show_gauge=lambda: ui_state.lane_center_gauge)
+    self._speed_assist_button = SpeedAssistButton(EXP_BUTTON_SIZE)
+    self._long_indicator = LongIndicatorTizi()
+    self._confidence_ball = ConfidenceBallTizi()
 
     self.pcm_cruise_speed: bool = True
     self.show_icbm_status: bool = False
@@ -49,7 +60,7 @@ class HudRendererSP(HudRenderer):
       return
 
     if ui_state.CP_SP is not None:
-      self.pcm_cruise_speed = ui_state.CP_SP.pcmCruiseSpeed
+      self.pcm_cruise_speed = not ui_state.icbm_running
     self.speed_conv = CV.MS_TO_KPH if ui_state.is_metric else CV.MS_TO_MPH
     self.speed_cluster = ui_state.sm['carState'].cruiseState.speedCluster * self.speed_conv
 
@@ -131,11 +142,19 @@ class HudRendererSP(HudRenderer):
   def _render(self, rect: rl.Rectangle) -> None:
     super()._render(rect)
 
-    if ui_state.torque_bar:
-      torque_rect = rect
-      if ui_state.developer_ui in (DeveloperUiState.BOTTOM, DeveloperUiState.BOTH):
-        torque_rect = rl.Rectangle(rect.x, rect.y, rect.width, rect.height - get_bottom_dev_ui_offset())
-      self._torque_bar.render(torque_rect)
+    if ui_state.has_longitudinal_control:
+      button_x = rect.x + rect.width - UI_BORDER_SIZE - EXP_BUTTON_SIZE
+      button_y = rect.y + UI_BORDER_SIZE
+      self._speed_assist_button.render(rl.Rectangle(button_x, button_y, EXP_BUTTON_SIZE, EXP_BUTTON_SIZE))
+    self._long_indicator.render(rect)
+    if ui_state.confidence_ball:
+      self._confidence_ball.render(rect)
+
+    # always rendered: lane center's gauge shows under it even with the bar itself off
+    torque_rect = rect
+    if ui_state.developer_ui in (DeveloperUiState.BOTTOM, DeveloperUiState.BOTH):
+      torque_rect = rl.Rectangle(rect.x, rect.y, rect.width, rect.height - get_bottom_dev_ui_offset())
+    self._torque_bar.render(torque_rect)
 
     self.developer_ui.render(rect)
     self.road_name_renderer.render(rect)
@@ -144,3 +163,6 @@ class HudRendererSP(HudRenderer):
     self.turn_signal_controller.render(rect)
     self.circular_alerts_renderer.render(rect)
     self.rocket_fuel.render(rect, ui_state.sm)
+
+  def user_interacting(self) -> bool:
+    return self._speed_assist_button.is_pressed

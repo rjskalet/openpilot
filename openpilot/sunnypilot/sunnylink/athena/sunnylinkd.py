@@ -17,7 +17,7 @@ import threading
 import time
 
 from functools import partial
-from openpilot.system.athena.rpc import dispatcher
+from openpilot.system.athena.rpc import boolean, dict_of, dispatcher, list_of, regex
 from openpilot.common.params import Params, ParamKeyType
 from openpilot.common.realtime import set_core_affinity
 from openpilot.common.swaglog import cloudlog
@@ -28,16 +28,21 @@ from websocket import (ABNF, WebSocket, WebSocketException, WebSocketTimeoutExce
                        create_connection, WebSocketConnectionClosedException)
 
 import openpilot.cereal.messaging as messaging
-from openpilot.sunnypilot.models.model_name import DEFAULT_MODEL, DEFAULT_BIG_MODEL
+from openpilot.sunnypilot import jetlink_adapter
+from openpilot.selfdrive.modeld.helpers import chestnut_present
+from openpilot.sunnypilot.models.model_name import DEFAULT_MODEL
 from openpilot.sunnypilot.selfdrive.car.sync_sunnylink_params import update_car_list_param
 from openpilot.sunnypilot.sunnylink.api import SunnylinkApi
 from openpilot.sunnypilot.sunnylink.utils import sunnylink_need_register, sunnylink_ready, get_param_as_byte, save_param_from_base64_encoded_string
-from openpilot.sunnypilot.sunnylink.capabilities import generate_capabilities, CAPABILITY_LABELS
+from openpilot.sunnypilot.sunnylink.capabilities import generate_capabilities, CAPABILITY_LABELS, CAR_CAPABILITY_FIELDS
 from openpilot.sunnypilot.sunnylink.tools.generate_settings_schema import generate_schema
 
 SUNNYLINK_ATHENA_HOST = os.getenv('SUNNYLINK_ATHENA_HOST', 'wss://athena.sunnylink.ai')
 HANDLER_THREADS = int(os.getenv('HANDLER_THREADS', "4"))
 LOCAL_PORT_WHITELIST = {8022}
+PARAM_KEY = regex(r'\w+')
+BASE64 = regex(r'[A-Za-z0-9+/]*={0,2}')
+SUNNYLINK_PROXY_URI = regex(r'wss://([\w-]+\.)*sunnylink\.ai(:\d+)?(/[\w./?=&%-]*)?')
 SUNNYLINK_LOG_ATTR_NAME = "user.sunny.upload"
 SUNNYLINK_RECONNECT_TIMEOUT_S = 70  # FYI changing this will also would require a change on sidebar.cc
 DISALLOW_LOG_UPLOAD = threading.Event()
@@ -54,6 +59,8 @@ BLOCKED_PARAMS = {
   "HasAcceptedTerms",
   "HasAcceptedTermsSP",
   "OnroadCycleRequested",      # Prevent remote cycle trigger
+  "AlphaLongitudinalEnabled",  # Flips longitudinal mode via an onroad cycle; local UI only
+  "OffroadMode",               # Applied by hardwared alone; remote writes go through OffroadModeRequested
   "ParamsVersion",         # Device-managed version counter
 }
 
@@ -73,7 +80,7 @@ def handle_long_poll(ws: WebSocket, exit_event: threading.Event | None) -> None:
               threading.Thread(target=sunny_log_handler, args=(end_event, comma_prime_cellular_end_event), name='log_handler'),
               threading.Thread(target=stat_handler, args=(end_event, Paths.stats_sp_root(), True), name='stat_handler'),
             ] + [
-              threading.Thread(target=jsonrpc_handler, args=(end_event, partial(startLocalProxy, end_event),), name=f'worker_{x}')
+              threading.Thread(target=jsonrpc_handler, args=(end_event, partial(startLocalProxy, end_event), SUNNYLINK_PROXY_URI), name=f'worker_{x}')
               for x in range(HANDLER_THREADS)
             ]
 
@@ -158,7 +165,7 @@ def sunny_log_handler(end_event: threading.Event, comma_prime_cellular_end_event
   comma_prime_cellular_end_event.set()
 
 
-@dispatcher.add_method
+@dispatcher.add_method(enabled=boolean)
 def toggleLogUpload(enabled: bool):
   DISALLOW_LOG_UPLOAD.clear() if enabled and DISALLOW_LOG_UPLOAD.is_set() else DISALLOW_LOG_UPLOAD.set()
 
@@ -181,8 +188,9 @@ def getParamsMetadata() -> str:
     schema = generate_schema()
     schema["capabilities"] = generate_capabilities()
     schema["capability_labels"] = CAPABILITY_LABELS
+    schema["car_capability_fields"] = CAR_CAPABILITY_FIELDS
     schema["default_model"] = DEFAULT_MODEL
-    schema["default_big_model"] = DEFAULT_BIG_MODEL
+    schema["default_big_model"] = jetlink_adapter.default_big_model(chestnut_present(), jetlink_adapter.status())
     schema["chestnut_active"] = params.get_bool("ChestnutActive")
     raw = json.dumps(schema, separators=(",", ":")).encode("utf-8")
     return base64.b64encode(gzip.compress(raw)).decode("utf-8")
@@ -191,7 +199,7 @@ def getParamsMetadata() -> str:
     raise
 
 
-@dispatcher.add_method
+@dispatcher.add_method(params_keys=list_of(PARAM_KEY), compression=boolean)
 def getParams(params_keys: list[str], compression: bool = False) -> str | dict[str, str]:
   params = Params()
   available_keys: list[str] = [k.decode('utf-8') for k in Params().all_keys()]
@@ -233,7 +241,7 @@ def getParams(params_keys: list[str], compression: bool = False) -> str | dict[s
     raise
 
 
-@dispatcher.add_method
+@dispatcher.add_method(params_to_update=dict_of(PARAM_KEY, BASE64), compression=boolean)
 def saveParams(params_to_update: dict[str, str], compression: bool = False) -> None:
   for key, value in params_to_update.items():
     # disallow modifications to blocked parameters

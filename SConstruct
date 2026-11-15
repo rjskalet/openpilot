@@ -20,7 +20,7 @@ SetOption('num_jobs', max(1, int(os.cpu_count()/(1 if "CI" in os.environ else 2)
 
 AddOption('--ccflags', action='store', type='string', default='', help='pass arbitrary flags over the command line')
 AddOption('--verbose', action='store_true', default=False, help='show full build commands')
-release = not os.path.exists(File('#.gitattributes').abspath) # file absent on release branch, see release_files.py
+release = not os.path.exists(File('#.gitmodules').abspath) # file absent on release branch, see release_files.py
 AddOption('--minimal',
           action='store_false',
           dest='extras',
@@ -55,24 +55,11 @@ assert arch in [
   "Darwin",       # macOS arm64 (x86 not supported)
 ]
 
-pkg_names = ['acados', 'capnproto', 'eigen', 'ffmpeg', 'json11', 'ncurses', 'zeromq', 'zstd']
+pkg_names = ['acados', 'capnproto', 'eigen', 'ffmpeg', 'json11', 'ncurses', 'zstd']
 pkgs = [importlib.import_module(name) for name in pkg_names]
 acados = pkgs[pkg_names.index('acados')]
 ffmpeg = pkgs[pkg_names.index('ffmpeg')]
-# Shared package ships .so/.dylib; older device venvs still have static .a only.
-# Keep static link deps (x264/z/va/drm) when the installed package is static so
-# COMMA_HARDWARE CI works without upgrading the device venv yet.
-# TODO: drop the static fallback once device venvs have comma-deps-ffmpeg>=7.1.0.post94
-_ffmpeg_lib_names = os.listdir(ffmpeg.LIB_DIR) if os.path.isdir(ffmpeg.LIB_DIR) else []
-ffmpeg_shared = any(
-  n.startswith('libavcodec.so') or (n.startswith('libavcodec') and n.endswith('.dylib'))
-  for n in _ffmpeg_lib_names
-)
 ffmpeg_libs = ['avformat', 'avcodec', 'swresample', 'avutil']
-if not ffmpeg_shared:
-  ffmpeg_libs += ['x264', 'z']
-  if arch != "Darwin":
-    ffmpeg_libs += ['va', 'va-drm', 'drm']
 acados_include_dirs = [
   acados.INCLUDE_DIR,
   os.path.join(acados.INCLUDE_DIR, "blasfeo", "include"),
@@ -87,7 +74,6 @@ acados_include_dirs = [
 # vendored in commaai/dependencies.
 allowed_system_libs = {
   "EGL", "GLESv2", "GL",
-  "Qt5Charts", "Qt5Core", "Qt5Gui", "Qt5Widgets",
   "dl", "drm", "gbm", "m", "pthread",
 }
 
@@ -121,6 +107,7 @@ def _libflags(target, source, env, for_signature):
 env = Environment(
   ENV={
     "PATH": os.environ['PATH'],
+    "TMPDIR": os.environ.get('TMPDIR', '/tmp'),
     "PYTHONPATH": os.pathsep.join(submodule_python_paths),
     "ACADOS_SOURCE_DIR": acados.DIR,
     "ACADOS_PYTHON_INTERFACE_PATH": acados.TEMPLATE_DIR,
@@ -160,12 +147,12 @@ env = Environment(
     "#rednose_repo/rednose/helpers",
     [x.LIB_DIR for x in pkgs],
   ],
-  RPATH=[ffmpeg.LIB_DIR] if ffmpeg_shared else [],
+  RPATH=[ffmpeg.LIB_DIR],
   CYTHONCFILESUFFIX=".cpp",
   COMPILATIONDB_USE_ABSPATH=True,
   REDNOSE_ROOT="#rednose_repo",
   tools=["default", "cython", "compilation_db", "rednose_filter"],
-  toolpath=["#msgq_repo/site_scons/site_tools", "#rednose_repo/site_scons/site_tools"],
+  toolpath=["#rednose_repo/site_scons/site_tools"],
 )
 # SCons' Darwin linker tool doesn't define the variables used to expand RPATH.
 if arch == "Darwin":
@@ -254,14 +241,11 @@ def prune_cache_dir(target=None, source=None, env=None):
 # Build common module
 SConscript(['openpilot/common/SConscript'])
 Import('_common')
-common = [_common, 'json11', 'zmq']
+common = [_common, 'json11']
 Export('common')
 
 # Build messaging (cereal + msgq + socketmaster + their dependencies)
-# Enable swaglog include in submodules
-env_swaglog = env.Clone()
-env_swaglog['CXXFLAGS'].append('-DSWAGLOG="\\"common/swaglog.h\\""')
-SConscript(['msgq_repo/SConscript'], exports={'env': env_swaglog})
+SConscript(['msgq_repo/SConscript'])
 
 SConscript(['openpilot/cereal/SConscript'])
 
@@ -307,7 +291,7 @@ if GetOption('extras') and arch != "comma_arm64":
 env.CompilationDatabase('compile_commands.json')
 
 # progress output
-def count_scons_nodes(nodes):
+def get_scons_nodes(nodes):
   seen = set()
   stack = list(nodes)
 
@@ -316,37 +300,26 @@ def count_scons_nodes(nodes):
     if node in seen:
       continue
     seen.add(node)
-    if hasattr(node, 'has_builder') and node.has_builder():
-      build_product_nodes.add(node)
-    executor = node.get_executor()
-    if executor is not None:
-      stack += executor.get_all_prerequisites() + executor.get_all_children()
+    # Only scan directories; generated sources are not ready yet.
+    stack += (node.prerequisites or []) + node.children(scan=isinstance(node, SCons.Node.FS.Dir))
 
-  return len(seen)
+  return seen
 
 progress_interval = 5
-progress_count = 0
-build_product_nodes = set()
-progress_total = max(1, count_scons_nodes(env.arg2nodes(BUILD_TARGETS or [Dir('.')], env.fs.Entry)))
+progress_nodes = get_scons_nodes(env.arg2nodes(BUILD_TARGETS or [Dir('.')], env.fs.Entry))
+progress_total = max(1, len(progress_nodes))
 
 def progress_function(node):
-  global progress_count
-  if progress_count >= progress_total:
+  if node not in progress_nodes:
     return
-  progress_count = min(progress_count + progress_interval, progress_total)
-  progress = round(100. * progress_count / progress_total, 1)
+  progress_nodes.remove(node)
+  if len(progress_nodes) % progress_interval:
+    return
+  progress = round(100. * (1 - len(progress_nodes) / progress_total), 1)
   sys.stderr.write("\rBuilding: %5.1f%%" % progress if sys.stderr.isatty() else "progress: %.1f\n" % progress)
   if progress == 100. and sys.stderr.isatty():
     sys.stderr.write("\n")
   sys.stderr.flush()
 
-Progress(progress_function, interval=progress_interval)
+Progress(progress_function)
 AddPostAction(BUILD_TARGETS or [Dir('.')], prune_cache_dir)
-
-def check_build_product_size(target, source, env):
-  limit = 50 * 1024 * 1024  # GitHub max size
-  for t in target:
-    if hasattr(t, 'isfile') and t.isfile() and (size := os.path.getsize(t.abspath)) > limit:
-      raise SCons.Errors.UserError(f"{t} is {size / (1024 * 1024):.1f} MiB, exceeding the {limit / (1024 * 1024):.1f} MiB limit")
-if not GetOption('extras'):
-  AddPostAction(list(build_product_nodes), Action(check_build_product_size, None))

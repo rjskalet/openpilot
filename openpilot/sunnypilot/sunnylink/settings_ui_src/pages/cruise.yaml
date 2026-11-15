@@ -7,23 +7,36 @@ order: 2
 remote_configurable: true
 description: Longitudinal control, speed limits, and cruise behavior
 sections:
-- id: core_cruise_features
-  title: ''
+- id: alpha_longitudinal
+  title: Alpha Longitudinal
   description: ''
   items:
-  - key: ExperimentalMode
+  - key: AlphaLongitudinalEnabled
     widget: toggle
-    title: Experimental Mode
+    needs_onroad_cycle: true
+    blocked: true
+    title: zoompilot Longitudinal Control (Alpha)
+    description: 'WARNING: zoompilot longitudinal control is in alpha for this car and may disable Automatic Emergency Braking
+      (AEB). On this car, zoompilot defaults to the car''s built-in ACC instead of zoompilot''s longitudinal control. Enable
+      this to switch to zoompilot longitudinal control. Changing this setting will restart zoompilot if the car is powered on.'
+    visibility:
+    - type: capability
+      field: alpha_long_available
+      equals: true
     enablement:
-    - $ref: '#/macros/longitudinal'
-  - key: DynamicExperimentalControl
+    - $ref: '#/macros/not_engaged'
+  - key: ExperimentalModeSetSpeed
     widget: toggle
-    title: Dynamic Experimental Control
-    description: Let the model decide when to use sunnypilot ACC or sunnypilot End to End Longitudinal.
+    title: Set Speed Assist
+    description: Drive toward your set speed and following distance whenever the driving model holds back. The model still makes every slowdown. The onroad button and a long press of the distance button switch it too.
     visibility:
     - $ref: '#/macros/longitudinal'
     enablement:
     - $ref: '#/macros/longitudinal'
+- id: core_cruise_features
+  title: ''
+  description: ''
+  items:
   - key: DisengageOnAccelerator
     widget: toggle
     title: Disengage Cruise on Accelerator Pedal
@@ -43,25 +56,10 @@ sections:
       label: Relaxed
     enablement:
     - $ref: '#/macros/longitudinal'
-  - key: IntelligentCruiseButtonManagement
-    widget: toggle
-    title: Intelligent Cruise Button Management (ICBM) (Alpha)
-    visibility:
-    - type: capability
-      field: icbm_available
-      equals: true
-    enablement:
-    - $ref: '#/macros/offroad'
-    - type: not
-      condition:
-        type: capability
-        field: has_longitudinal_control
-        equals: true
 - id: custom_acc_increments
   title: Custom ACC Speed Intervals
   description: ''
   enablement:
-  - $ref: '#/macros/offroad'
   - type: any
     conditions:
     - type: all
@@ -82,7 +80,6 @@ sections:
     widget: toggle
     title: Enable Custom ACC Speed Intervals
     enablement:
-    - $ref: '#/macros/offroad'
     - type: any
       conditions:
       - type: all
@@ -98,6 +95,7 @@ sections:
       - type: capability
         field: has_icbm
         equals: true
+    - $ref: '#/macros/icbm_feature_not_engaged'
   sub_panels:
   - id: custom_acc_intervals
     label: Custom ACC Speed Intervals Settings
@@ -151,6 +149,15 @@ sections:
         enablement:
         - type: any
           conditions:
+          - type: not_engaged
+          - type: param
+            key: SpeedLimitMode
+            equals: 3
+          - type: capability
+            field: has_icbm
+            equals: false
+        - type: any
+          conditions:
           - type: capability
             field: has_longitudinal_control
             equals: true
@@ -175,17 +182,19 @@ sections:
     - key: SpeedLimitPolicy
       widget: multiple_button
       title: Speed Limit Source
+      description: Auto follows the limit your car shows, and the map where it shows none. The map also slows you before
+        a lower limit ahead.
+      visibility:
+      - type: capability
+        field: has_speed_limit
+        equals: true
       options:
-      - value: 0
-        label: Car State Only
-      - value: 1
-        label: Map Data Only
       - value: 2
-        label: Car State Priority
-      - value: 3
-        label: Map Data Priority
-      - value: 4
-        label: Combined
+        label: Auto
+      - value: 0
+        label: Car Only
+      - value: 1
+        label: Map Only
     - key: SpeedLimitOffsetType
       widget: multiple_button
       title: Speed Limit Offset Type
@@ -245,6 +254,7 @@ sections:
       - type: capability
         field: has_icbm
         equals: true
+    - $ref: '#/macros/icbm_scc_not_engaged'
   - key: SmartCruiseControlMap
     widget: toggle
     title: Map
@@ -266,4 +276,43 @@ sections:
         equals: true
       - type: capability
         field: has_icbm
+        equals: true
+    - $ref: '#/macros/icbm_scc_not_engaged'
+  - key: CurveSpeedProfile
+    widget: multiple_button
+    title: Curve Speed
+    description: How fast Slow for Curves takes turns. Gentle slows more, Sporty slows less.
+    # values are the index into curve_speed_profile.SCALES
+    options:
+    - value: 0
+      label: Gentle
+    - value: 1
+      label: Normal
+    - value: 2
+      label: Sporty
+    visibility:
+    - type: any
+      conditions:
+      - type: capability
+        field: has_longitudinal_control
+        equals: true
+      - type: capability
+        field: has_icbm
+        equals: true
+    enablement:
+    - type: any
+      conditions:
+      - type: capability
+        field: has_longitudinal_control
+        equals: true
+      - type: capability
+        field: has_icbm
+        equals: true
+    - type: any
+      conditions:
+      - type: param
+        key: SmartCruiseControlVision
+        equals: true
+      - type: param
+        key: SmartCruiseControlMap
         equals: true

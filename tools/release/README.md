@@ -11,7 +11,7 @@
   - [ ] push the new branch
 - [ ] push to staging:
   - [ ] make sure you are on the newly created release master branch (`zerotentwo`)
-  - [ ] run `BRANCH=devel-staging tools/release/build_stripped.sh`. Jenkins will then automatically build staging on device, run `test_onroad` and update the staging branch
+  - [ ] run `BRANCH=devel-staging tools/release/build_stripped.sh`. alfred will then automatically build staging on device, run `test_onroad` and update the staging branch
 - [ ] bump version on master: `openpilot/common/version.h` and `RELEASES.md`
 - [ ] post on Discord, tag `@release crew`
 
@@ -21,8 +21,8 @@
   - [ ] update from new release -> previous release
   - [ ] fresh install with `openpilot-test.comma.ai`
   - [ ] drive on fresh install
-  - [ ] no submodules or LFS
-  - [ ] check sentry, MTBF, etc.
+  - [ ] no submodules; only the Chestnut big driving model uses LFS
+  - [ ] check MTBF, etc.
   - [ ] stress test passes in production
 - [ ] publish the blog post
 - [ ] `git reset --hard origin/release-mici-staging`

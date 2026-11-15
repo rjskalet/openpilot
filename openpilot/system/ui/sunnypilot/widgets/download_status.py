@@ -7,7 +7,7 @@ See the LICENSE.md file in the root directory for more details.
 import math
 
 import numpy as np
-import pyray as rl
+import raylib_nb as rl
 
 from openpilot.system.ui.lib.application import TextAlignment, TextAlignmentVertical
 
@@ -57,7 +57,7 @@ class DownloadStatusAction(ItemAction):
     self.icon: str | None = None
     self.icon_color: rl.Color | None = None
     self._font = gui_app.font(FontWeight.NORMAL)
-    # raw progress arrives in steps, one per 128KB chunk the manager publishes
+    # raw progress arrives in steps, one per progress report from the manager
     self._progress = FirstOrderFilter(0.0, 0.5, 1 / gui_app.target_fps)
     # integrated per frame; (t * speed) % span jumps whenever the fill width changes
     self._sweep = 0.0

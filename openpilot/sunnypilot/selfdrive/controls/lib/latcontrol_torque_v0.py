@@ -49,6 +49,7 @@ class LatControlTorque(LatControl):
     self.measurement_rate_filter = FirstOrderFilter(0.0, 1 / (2 * np.pi * LP_FILTER_CUTOFF_HZ), self.dt)
 
     self.extension = LatControlTorqueExt(self, CP, CP_SP, CI)
+    self.update_limits()  # the __init__ call above ran before the extension existed
 
   def update_torque_parameters(self, latAccelFactor, latAccelOffset, friction):
     self.torque_params.latAccelFactor = latAccelFactor
@@ -59,6 +60,11 @@ class LatControlTorque(LatControl):
   def update_limits(self):
     self.pid.set_limits(self.lateral_accel_from_torque(self.steer_max, self.torque_params),
                         self.lateral_accel_from_torque(-self.steer_max, self.torque_params))
+    # torque-space extension controllers need +-steer_max instead; re-assert on every reset
+    # path (live params, per-frame override) or they run with lat-accel-space limits.
+    # hasattr: the first call happens in __init__ before the extension exists
+    if hasattr(self, 'extension'):
+      self.extension.update_limits()
 
   def update(self, active, CS, VM, params, steer_limited_by_safety, desired_curvature, calibrated_pose, curvature_limited, lat_delay):
     # Override torque params from extension
@@ -100,12 +106,17 @@ class LatControlTorque(LatControl):
       ff += get_friction(error, lateral_accel_deadzone, FRICTION_THRESHOLD, self.torque_params)
 
       freeze_integrator = steer_limited_by_safety or CS.steeringPressed or CS.vEgo < 5
-      output_lataccel = self.pid.update(pid_log.error,
-                                       -measurement_rate,
-                                        feedforward=ff,
-                                        speed=CS.vEgo,
-                                        freeze_integrator=freeze_integrator)
-      output_torque = self.torque_from_lateral_accel(output_lataccel, self.torque_params)
+      if self.extension.overrides_output:
+        # the extension runs its own torque-space pid.update on the shared PID; a stock
+        # update here would also integrate the lat-accel-space error into the integrator
+        output_torque = 0.0
+      else:
+        output_lataccel = self.pid.update(pid_log.error,
+                                         -measurement_rate,
+                                          feedforward=ff,
+                                          speed=CS.vEgo,
+                                          freeze_integrator=freeze_integrator)
+        output_torque = self.torque_from_lateral_accel(output_lataccel, self.torque_params)
 
       # Lateral acceleration torque controller extension updates
       # Overrides pid_log.error and output_torque

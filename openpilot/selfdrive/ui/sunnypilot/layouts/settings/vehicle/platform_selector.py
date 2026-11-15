@@ -6,7 +6,7 @@ See the LICENSE.md file in the root directory for more details.
 """
 import json
 import os
-import pyray as rl
+import raylib_nb as rl
 from collections.abc import Callable
 from functools import partial
 
@@ -92,7 +92,7 @@ class PlatformSelector(Button):
 
   def _on_platform_selected(self, dialog, res):
     if res == DialogResult.CONFIRM and dialog.selection_ref:
-      offroad_msg = tr("This setting will take effect immediately.") if ui_state.is_offroad else \
+      offroad_msg = tr("This setting will take effect immediately.") if ui_state.is_offroad() else \
                     tr("This setting will take effect once the device enters offroad state.")
 
       callback = partial(self._confirm_platform, dialog.selection_ref)

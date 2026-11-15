@@ -11,8 +11,6 @@ from setproctitle import setproctitle
 
 from openpilot.cereal import log
 from opendbc.car.structs import car
-import openpilot.cereal.messaging as messaging
-import openpilot.system.sentry as sentry
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
@@ -26,12 +24,8 @@ def launcher(proc: str, name: str) -> None:
     # rename the process
     setproctitle(proc)
 
-    # create new context since we forked
-    messaging.reset_context()
-
     # add daemon name tag to logs
     cloudlog.bind(daemon=name)
-    sentry.set_tag("daemon", name)
 
     # exec the process
     mod.main()
@@ -40,7 +34,7 @@ def launcher(proc: str, name: str) -> None:
   except Exception:
     # can't install the crash handler because sys.excepthook doesn't play nice
     # with threads, so catch it here.
-    sentry.capture_exception()
+    cloudlog.exception("crash")
     raise
 
 
@@ -62,7 +56,6 @@ def join_process(process: Process, timeout: float) -> None:
 
 class ManagerProcess(ABC):
   daemon = False
-  sigkill = False
   should_run: Callable[[bool, Params, car.CarParams], bool]
   proc: Process | None = None
   enabled = True
@@ -81,7 +74,7 @@ class ManagerProcess(ABC):
       if not self.shutting_down:
         cloudlog.info(f"killing {self.name}")
         if sig is None:
-          sig = signal.SIGKILL if self.sigkill else signal.SIGINT
+          sig = signal.SIGINT
         self.signal(sig)
         self.shutting_down = True
 
@@ -132,13 +125,12 @@ class ManagerProcess(ABC):
 
 
 class NativeProcess(ManagerProcess):
-  def __init__(self, name, cwd, cmdline, should_run, enabled=True, sigkill=False):
+  def __init__(self, name, cwd, cmdline, should_run, enabled=True):
     self.name = name
     self.cwd = cwd
     self.cmdline = cmdline
     self.should_run = should_run
     self.enabled = enabled
-    self.sigkill = sigkill
     self.launcher = nativelauncher
 
   def start(self) -> None:
@@ -157,12 +149,11 @@ class NativeProcess(ManagerProcess):
 
 
 class PythonProcess(ManagerProcess):
-  def __init__(self, name, module, should_run, enabled=True, sigkill=False):
+  def __init__(self, name, module, should_run, enabled=True):
     self.name = name
     self.module = module
     self.should_run = should_run
     self.enabled = enabled
-    self.sigkill = sigkill
     self.launcher = launcher
 
   def start(self) -> None:

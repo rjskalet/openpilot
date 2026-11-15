@@ -5,7 +5,7 @@ This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
 from collections.abc import Callable
-import pyray as rl
+import raylib_nb as rl
 
 from opendbc.sunnypilot.car.tesla.values import MadsScreenButtonType, TeslaFlagsSP
 from openpilot.selfdrive.ui.ui_state import ui_state
@@ -17,16 +17,18 @@ from openpilot.system.ui.widgets.scroller_tici import Scroller
 from openpilot.system.ui.sunnypilot.widgets.list_view import multiple_button_item_sp, toggle_item_sp
 
 MADS_STEERING_MODE_OPTIONS = [
-  (tr("Remain Active"), tr_noop("Remain Active: ALC will remain active when the brake pedal is pressed.")),
-  (tr("Pause"), tr_noop("Pause: ALC will pause when the brake pedal is pressed.")),
-  (tr("Disengage"), tr_noop("Disengage: ALC will disengage when the brake pedal is pressed.")),
+  (tr("Remain"), tr_noop("Remain: steering stays on.")),
+  (tr("Pause"), tr_noop("Pause: steering pauses and resumes when you let go.")),
+  (tr("Disengage"), tr_noop("Disengage: steering turns off.")),
 ]
 
-MADS_MAIN_CRUISE_BASE_DESC = tr("Note: For vehicles without LFA/LKAS button, disabling this will prevent lateral control engagement.")
-MADS_UNIFIED_ENGAGEMENT_MODE_BASE_DESC = "{engage}<br><h4>{note}</h4>".format(
-  engage=tr("Engage lateral and longitudinal control with cruise control engagement."),
-  note=tr("Note: Once lateral control is engaged via UEM, it will remain engaged until it is manually disabled via the MADS button or car shut off."),
-)
+MADS_MAIN_CRUISE_BASE_DESC = tr("Turning cruise on with its on/off button also turns steering on. "
+                                + "Cars without a lane keep button need this on to steer.")
+MADS_UNIFIED_ENGAGEMENT_MODE_BASE_DESC = tr("Setting or resuming a cruise speed also turns steering on. "
+                                            + "Steering then stays on until you switch it off or turn off the car.")
+
+MADS_TJA_BUTTON_DESC = tr("The wheel's TJA button becomes the only steering switch. The MRCC button then only controls cruise. "
+                          + "Turn on only if your car has the button.")
 
 STATUS_CHECK_COMPATIBILITY = tr("Start the vehicle to check vehicle compatibility.")
 DEFAULT_TO_OFF = tr("This feature defaults to OFF, and does not allow selection due to vehicle limitations.")
@@ -44,18 +46,18 @@ class MadsSettingsLayout(Widget):
 
   def _initialize_items(self):
     self._main_cruise_toggle = toggle_item_sp(
-      title=lambda: tr("Toggle with Main Cruise"),
+      title=lambda: tr("Steer When Cruise On"),
       description=MADS_MAIN_CRUISE_BASE_DESC,
       param="MadsMainCruiseAllowed",
     )
     self._unified_engagement_toggle = toggle_item_sp(
-      title=lambda: tr("Unified Engagement Mode (UEM)"),
+      title=lambda: tr("Steer When Cruise Set"),
       description=MADS_UNIFIED_ENGAGEMENT_MODE_BASE_DESC,
       param="MadsUnifiedEngagementMode"
     )
     self._steering_mode = multiple_button_item_sp(
       param="MadsSteeringMode",
-      title=lambda: tr("Steering Mode on Brake Pedal"),
+      title=lambda: tr("Steering on Brake"),
       description="",
       buttons=[opt[0] for opt in MADS_STEERING_MODE_OPTIONS],
       inline=False,
@@ -63,10 +65,19 @@ class MadsSettingsLayout(Widget):
       callback=self._update_steering_mode_description,
     )
 
+    self._tja_button_toggle = toggle_item_sp(
+      title=lambda: tr("Mazda TJA Button"),
+      description=MADS_TJA_BUTTON_DESC,
+      param="MazdaTjaButton",
+      enabled=ui_state.is_offroad,
+    )
+    self._tja_button_toggle.set_visible(lambda: ui_state.offroad_brand() == "mazda")
+
     self.items = [
       self._main_cruise_toggle,
       self._unified_engagement_toggle,
       self._steering_mode,
+      self._tja_button_toggle,
     ]
 
   def _update_state(self):
@@ -103,7 +114,7 @@ class MadsSettingsLayout(Widget):
     return False
 
   def _update_steering_mode_description(self, button_index: int):
-    base_desc = tr("Choose how Automatic Lane Centering (ALC) behaves after the brake pedal is manually pressed in sunnypilot.")
+    base_desc = tr("What steering does when you press the brake.")
     result = base_desc + "<br><br>"
     for opt in MADS_STEERING_MODE_OPTIONS:
       desc = "<b>" + opt[1] + "</b>" if button_index == MADS_STEERING_MODE_OPTIONS.index(opt) else opt[1]
@@ -112,7 +123,7 @@ class MadsSettingsLayout(Widget):
     self._steering_mode.show_description(True)
 
   def _update_toggles(self):
-    self._update_steering_mode_description(self._steering_mode.action_item.get_selected_button())
+    self._update_steering_mode_description(self._steering_mode.action_item.selected_button)
     if self._mads_limited_settings():
       ui_state.params.remove("MadsMainCruiseAllowed")
       ui_state.params.put_bool("MadsUnifiedEngagementMode", True)

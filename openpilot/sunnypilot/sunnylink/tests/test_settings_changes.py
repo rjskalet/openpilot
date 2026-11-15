@@ -19,12 +19,14 @@ from openpilot.common.parameterized import parameterized
 
 from openpilot.sunnypilot.sunnylink.tools.generate_settings_schema import (
   DEFINITION_PATH,
+  TORQUE_TUNE_KEYS,
   TORQUE_VERSIONS_PATH,
   _build_torque_options,
   _load_torque_versions,
   generate_schema,
 )
 from openpilot.common.test import OpenpilotTestCase
+from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.demand import CONSUMER_BY_KEY, CONSUMERS
 
 
 SCHEMA_VALIDATOR_PATH = os.path.join(os.path.dirname(DEFINITION_PATH), "settings_ui.schema.json")
@@ -172,14 +174,25 @@ class TestTorqueOptionGeneration(OpenpilotTestCase):
     versions = _load_torque_versions()
     assert versions, "latcontrol_torque_versions.json must have at least one version"
     expected = _build_torque_options(versions)
-    item = _find_item(schema, "TorqueControlTune")
-    assert item is not None, "TorqueControlTune item must be present"
-    assert item.get("options") == expected
+    for key in TORQUE_TUNE_KEYS:
+      item = _find_item(schema, key)
+      assert item is not None, f"{key} item must be present"
+      assert item.get("options") == expected
 
   def test_torque_versions_path_resolves(self):
     assert os.path.exists(TORQUE_VERSIONS_PATH), (
       f"latcontrol_torque_versions.json not found at {TORQUE_VERSIONS_PATH}"
     )
+
+  def test_no_static_torque_options_in_definition(self):
+    """The injector overwrites the tune keys' options for every consumer, so a static
+    list in settings_ui.json is dead data that silently drifts from the versions file."""
+    with open(DEFINITION_PATH) as f:
+      raw = json.load(f)
+    for key in TORQUE_TUNE_KEYS:
+      item = _find_item(raw, key)
+      assert item is not None, f"{key} item must be present"
+      assert "options" not in item, f"{key} must not carry static options; they come from latcontrol_torque_versions.json"
 
 
 class TestReleaseBranchGates(OpenpilotTestCase):
@@ -201,17 +214,13 @@ class TestSpuriousOffroadGatesDropped(OpenpilotTestCase):
     assert item is not None
     assert "offroad_only" not in _flatten_rule_types(item.get("enablement"))
 
-  def test_dynamic_experimental_has_no_offroad_only(self, schema):
-    item = _find_item(schema, "DynamicExperimentalControl")
-    assert item is not None
-    assert "offroad_only" not in _flatten_rule_types(item.get("enablement"))
-
 
 class TestNotEngagedReplacement(OpenpilotTestCase):
   @parameterized.expand([
     "AlphaLongitudinalEnabled",
     "ToyotaEnforceStockLongitudinal",
     "ToyotaStopAndGoHack",
+    "ToyotaTSS2Smooth",
   ], names=["key"])
   def test_offroad_only_replaced_with_not_engaged(self, schema, key):
     """These items should use not_engaged, not offroad_only."""
@@ -220,3 +229,24 @@ class TestNotEngagedReplacement(OpenpilotTestCase):
     rule_types = _flatten_rule_types(item.get("enablement"))
     assert "offroad_only" not in rule_types, f"{key} still uses offroad_only"
     assert "not_engaged" in rule_types, f"{key} missing not_engaged"
+
+
+class TestIcbmFeaturesLockWhileEngaged(OpenpilotTestCase):
+  """ICBM has no toggle and only starts between engagements, so the features that bring it up
+  are not changed remotely while engaged on a car that has it."""
+
+  @parameterized.expand([c.key for c in CONSUMERS], names=["key"])
+  def test_every_icbm_feature_locks_while_engaged(self, schema, key):
+    """Every entry in demand.CONSUMERS: the toggle itself, or for a selector the option that
+    asks for ICBM."""
+    consumer = CONSUMER_BY_KEY[key]
+    item = _find_item(schema, key)
+    assert item is not None, f"{key} not found"
+    if isinstance(consumer.on, bool):
+      rules = item.get("enablement")
+    else:
+      rules = next(o for o in item["options"] if o["value"] == consumer.on).get("enablement")
+    assert "not_engaged" in _flatten_rule_types(rules)
+
+  def test_no_icbm_toggle(self, schema):
+    assert _find_item(schema, "IntelligentCruiseButtonManagement") is None

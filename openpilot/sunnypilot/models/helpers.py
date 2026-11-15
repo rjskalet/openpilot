@@ -16,7 +16,7 @@ from openpilot.common.hardware.hw import Paths
 from openpilot.selfdrive.modeld.helpers import chestnut_present
 
 # SET ME TO THE EXACT JSON VERSION WE SET IN SUNNYPILOT_MODELS REPO
-REQUIRED_JSON_VERSION = 19
+REQUIRED_JSON_VERSION = 21
 
 CUSTOM_MODEL_PATH = Paths.model_root()
 ModelManager = custom.ModelManagerSP
@@ -29,9 +29,8 @@ _LAST_VALIDATED_RAW: dict[str, dict | None] = {}
 
 
 def _compute_hash(file_path: str) -> str | None:
-  from openpilot.common.file_chunker import open_file_chunked
   try:
-    with open_file_chunked(file_path) as file:
+    with open(file_path, 'rb') as file:
       return hashlib.file_digest(file, "sha256").hexdigest().lower()
   except FileNotFoundError:
     return None
@@ -58,20 +57,11 @@ def is_bundle_version_compatible(bundle: dict) -> bool:
 
 def _bundle_artifacts(bundle: custom.ModelManagerSP.ModelBundle) -> list[tuple[str, str]]:
   artifacts = []
-  from openpilot.common.file_chunker import get_chunk_name
   for model in getattr(bundle, 'models', []) or []:
-    for artifact in (getattr(model, 'artifact', None),):
-      if artifact and getattr(artifact, 'fileName', None):
-        if len(artifact.chunks) > 0:
-          for i, chunk in enumerate(artifact.chunks):
-            chunk_name = get_chunk_name(artifact.fileName, i, len(artifact.chunks))
-            if getattr(chunk, 'sha256', None):
-              artifacts.append((chunk_name, chunk.sha256))
-        else:
-          if getattr(artifact, 'downloadUri', None):
-            sha256 = getattr(artifact.downloadUri, 'sha256', None)
-            if sha256:
-              artifacts.append((artifact.fileName, sha256))
+    artifact = getattr(model, 'artifact', None)
+    if artifact and getattr(artifact, 'fileName', None) and getattr(artifact, 'downloadUri', None):
+      if sha256 := getattr(artifact.downloadUri, 'sha256', None):
+        artifacts.append((artifact.fileName, sha256))
   return artifacts
 
 
@@ -81,21 +71,24 @@ def _bundle_is_valid_locally(bundle: custom.ModelManagerSP.ModelBundle) -> bool:
              for file_name, expected_hash in _bundle_artifacts(bundle))
 
 
-def _bundle_needs_reset(active_bundle: custom.ModelManagerSP.ModelBundle, available_bundles: list[custom.ModelManagerSP.ModelBundle] | None) -> bool:
+def _matching_bundle(active_bundle: custom.ModelManagerSP.ModelBundle,
+                     available_bundles: list[custom.ModelManagerSP.ModelBundle]) -> "custom.ModelManagerSP.ModelBundle | None":
+  for bundle in available_bundles:
+    if active_bundle.ref and bundle.ref:
+      if active_bundle.ref == bundle.ref:
+        return bundle
+    elif active_bundle.internalName == bundle.internalName:
+      return bundle
+  return None
+
+
+def _bundle_needs_reset(active_bundle: custom.ModelManagerSP.ModelBundle, available_bundles: list[custom.ModelManagerSP.ModelBundle] | None,
+                        check_files: bool) -> bool:
   if active_bundle is None:
     return False
 
   if available_bundles is not None:
-    matching_bundle = None
-    for bundle in available_bundles:
-      if active_bundle.ref and bundle.ref:
-        if active_bundle.ref == bundle.ref:
-          matching_bundle = bundle
-          break
-      elif active_bundle.internalName == bundle.internalName:
-        matching_bundle = bundle
-        break
-
+    matching_bundle = _matching_bundle(active_bundle, available_bundles)
     if matching_bundle is None:
       return True
     if active_bundle.minimumSelectorVersion != matching_bundle.minimumSelectorVersion:
@@ -105,7 +98,7 @@ def _bundle_needs_reset(active_bundle: custom.ModelManagerSP.ModelBundle, availa
     if set(_bundle_artifacts(active_bundle)) != set(_bundle_artifacts(matching_bundle)):
       return True
 
-  return not _bundle_is_valid_locally(active_bundle)
+  return check_files and not _bundle_is_valid_locally(active_bundle)
 
 
 def _parse_active_bundle(raw_bundle) -> "custom.ModelManagerSP.ModelBundle | None":
@@ -133,9 +126,30 @@ def get_active_source(chestnut: bool | None = None, chestnut_active: bool | None
 
 def get_active_bundle(params: Params | None = None, *, chestnut: bool | None = None) -> "custom.ModelManagerSP.ModelBundle | None":
   # no cross-slot fallback: an empty active slot means the hardware default, which
-  # only stock modeld can run - modeld_v2 requires a real bundle
+  # only stock modeld can run - modeld_v2 requires a real bundle. zoompilot leaves the
+  # built-in big pkl out, so a chestnut's empty slot gets the Default bundle downloaded
+  # instead (ModelManagerSP._fetch_big_model_files)
   params = params or Params()
-  return get_selected_bundle(params, get_active_source(chestnut=chestnut))
+  source = get_active_source(chestnut=chestnut)
+  bundle = get_selected_bundle(params, source)
+  if source == "chestnut" and bundle is not None and not _big_files_ready(params, bundle):
+    return None
+  return bundle
+
+
+def _big_files_ready(params: Params, bundle: custom.ModelManagerSP.ModelBundle) -> bool:
+  """A chestnut pick whose files are not all here, or are being fetched again,
+  is not run until the manager has them (ModelManagerSP._fetch_big_model_files):
+  stock modeld drives meanwhile, on the small model where the built-in big pkl is
+  left out (zoompilot). Upstream resets the pick instead; keeping it loses nothing. Existence only:
+  this is asked every manager tick, and the manager hashes them once per ref."""
+  downloading = params.get("ModelManager_DownloadRef")
+  if isinstance(downloading, bytes):
+    downloading = downloading.decode()
+  if downloading == bundle.ref:
+    return False
+  model_root = Paths.model_root()
+  return all(os.path.isfile(os.path.join(model_root, name)) for name, _ in _bundle_artifacts(bundle))
 
 
 def resolve_bundle_by_ref(
@@ -148,31 +162,51 @@ def resolve_bundle_by_ref(
   return None
 
 
-def _validate_active_bundle(params: Params, source: str, available_bundles: list[custom.ModelManagerSP.ModelBundle] | None = None) -> None:
+def _validate_active_bundle(params: Params, source: str, available_bundles: list[custom.ModelManagerSP.ModelBundle] | None = None) -> dict | None:
   global _LAST_VALIDATED_RAW
+  # the big-model slot's missing files are fetched, not a reason to reset: an
+  # accelerator runs the pick without them, and for a chestnut the manager
+  # fetches them (ModelManagerSP._fetch_big_model_files). A change from
+  # upstream for chestnuts too: files gone means a re-fetch, not the default
+  check_files = source != "chestnut"
 
   key = ACTIVE_BUNDLE_KEYS[source]
   raw_bundle = params.get(key)
   if not raw_bundle:
-    return
+    return None
 
   if _LAST_VALIDATED_RAW.get(key) == raw_bundle:
-    return
+    return None
 
   active_bundle = _parse_active_bundle(raw_bundle)
-  if active_bundle is None or _bundle_needs_reset(active_bundle, available_bundles):
+  if source == "chestnut" and active_bundle is not None and available_bundles and _bundle_needs_reset(active_bundle, available_bundles, False) \
+     and (listed := _matching_bundle(active_bundle, available_bundles)) is not None:
+    # the catalog lists the big pick under another entry (jetlink's list in place of sunnypilot's, or
+    # a rebuild): the slot takes the new entry in place. Emptied, even for the tick before the pick is
+    # carried over, jetlink would take it for the Default chosen and pick that on the Jetson too
+    cloudlog.warning(f"Active model bundle for {source} is listed anew; updating it in place")
+    listed.status = custom.ModelManagerSP.DownloadStatus.downloaded
+    params.put(key, listed.to_dict(), block=True)
+    _LAST_VALIDATED_RAW[key] = params.get(key)
+    return None
+  if active_bundle is None or _bundle_needs_reset(active_bundle, available_bundles, check_files):
     cloudlog.warning(f"Active model bundle invalid for {source}; resetting to default")
     params.remove(key)
     _LAST_VALIDATED_RAW[key] = None
-  else:
-    _LAST_VALIDATED_RAW[key] = raw_bundle
+    return raw_bundle
+  _LAST_VALIDATED_RAW[key] = raw_bundle
+  return None
 
 
-def validate_active_bundles(params: Params, source_bundles: dict[str, list[custom.ModelManagerSP.ModelBundle]]) -> None:
+def validate_active_bundles(params: Params, source_bundles: dict[str, list[custom.ModelManagerSP.ModelBundle]]) -> dict[str, dict]:
+  """Clears each slot whose pick no longer matches its catalog; returns the cleared picks by source."""
+  cleared = {}
   # an empty list means the fetch failed, not that the catalog dropped the bundle
   for source, bundles in source_bundles.items():
-    _validate_active_bundle(params, source, bundles or None)
+    if (raw := _validate_active_bundle(params, source, bundles or None)) is not None:
+      cleared[source] = raw
   get_active_model_runner(params, force_check=True)
+  return cleared
 
 
 def get_active_model_runner(params: Params | None = None, force_check: bool = False) -> int:

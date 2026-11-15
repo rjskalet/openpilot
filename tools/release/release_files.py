@@ -14,18 +14,21 @@ blacklist = [
 
   "matlab.*.md",
 
-  # no LFS or submodules in release
+  # release scripts configure LFS for the big driving model and warps
   ".lfsconfig",
   ".gitattributes",
   ".git$",
   ".gitmodules",
   ".run/",
   ".idea/",
+
+  # jetlink: the comma imports the package and runs scripts/comma/ (jetlink.comma.root);
+  # the rest of the submodule is the Jetson's, the Mac's and the iPhone's
+  "^jetlink_repo/(?!jetlink/|scripts/comma/|LICENSE$)",
 ]
 
 # gets you through the blacklist
-whitelist: list[str] = [
-]
+whitelist: list[str] = [r"^\.lfsconfig$"] if os.getenv("INCLUDE_BIG_MODEL") else []
 
 
 if __name__ == "__main__":
@@ -35,7 +38,7 @@ if __name__ == "__main__":
       continue
 
     rf = os.fsdecode(tracked_file)
-    if not os.getenv("INCLUDE_BIG_MODEL") and rf.startswith("openpilot/selfdrive/modeld/models/big_driving_supercombo.onnx"):
+    if not os.getenv("INCLUDE_BIG_MODEL") and rf.startswith("openpilot/selfdrive/modeld/models/big_"):
       continue
     blacklisted = any(re.search(p, rf) for p in blacklist)
     whitelisted = any(re.search(p, rf) for p in whitelist)
