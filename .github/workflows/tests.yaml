@@ -142,6 +142,8 @@ jobs:
     - run: ./tools/op.sh setup
     - name: Build openpilot
       run: scons
+    - name: Test strict Mazda replay acceptance policy
+      run: python3 -m unittest openpilot.selfdrive.test.process_replay.test_accepted_deltas
     - name: Run replay
       timeout-minutes: ${{ contains(runner.name, 'nsc') && 2 || 20 }}
       continue-on-error: ${{ github.ref == 'refs/heads/master' }}
