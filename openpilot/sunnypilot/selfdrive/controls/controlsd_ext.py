@@ -40,8 +40,8 @@ class ControlsExt(ModelStateBase):
     # controller selection, rail classification, and live bins are isolated to the Mazda EPS
     # configuration this branch is intended to support.
     fleet_torque_validated = feature_validated(params, CP, "FleetTorque")
-    self._zoompilot_mazda = (fleet_torque_validated and CP.brand == 'mazda'
-                             and bool(CP.flags & MazdaFlags.STEER_TO_ZERO_EPS))
+    self._donor_eps_mazda = (CP.brand == 'mazda' and bool(CP.flags & MazdaFlags.STEER_TO_ZERO_EPS))
+    self._zoompilot_mazda = fleet_torque_validated and self._donor_eps_mazda
     self._speed_dependent_torque = (fleet_torque_validated and bool(get_speed_dep_config_for_car(CP)))
     self._steer_slew_schedule = get_steer_slew_schedule(CP) if self._zoompilot_mazda else None
     self._lat_active_last = False
@@ -63,6 +63,16 @@ class ControlsExt(ModelStateBase):
         return LatControlTorqueV0(self.CP, self.CP_SP, CI, dt)
       elif version == 2.0:
         return LatControlTorqueV2(self.CP, self.CP_SP, CI, dt)
+      return lac
+
+    # A donor-EPS Mazda with an unvalidated FleetTorque build must fail closed to the
+    # established torque-v0 fallback. Do not let a saved v2 tune fall through to SunnyPilot's
+    # generic v1 controller: that makes configured and reported controller versions disagree,
+    # and bypasses the donor-EPS architecture without authorizing v2 or its learned tables.
+    if self._donor_eps_mazda:
+      if self.CP.lateralTuning.which() == 'torque':
+        cloudlog.warning("Unvalidated donor-EPS Mazda: selecting torque v0 fallback")
+        return LatControlTorqueV0(self.CP, self.CP_SP, CI, dt)
       return lac
 
     # Original SunnyPilot selection path for all other cars. Process replay depends on this
