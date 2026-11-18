@@ -199,7 +199,10 @@ class TorqueEstimatorExt:
       return
     try:
       from openpilot.selfdrive.locationd.torqued import TorqueEstimator, VERSION, MIN_FILTER_DECAY, MAX_FILTER_DECAY, get_torque_cache_keys
-      torque_cache_key, car_params_cache_key = get_torque_cache_keys(self.CP)
+      # speed_binned is only enabled after FleetTorque validation succeeds. Keep restore
+      # in the same vehicle-specific namespace used by TorqueEstimator's validated save
+      # path instead of falling back to the helper's unvalidated global-key default.
+      torque_cache_key, car_params_cache_key = get_torque_cache_keys(self.CP, self.speed_binned)
       if cache_ltp is None:
         cache = self._params.get(torque_cache_key)
         if not cache and torque_cache_key != "LiveTorqueParameters":
