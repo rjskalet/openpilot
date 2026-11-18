@@ -48,8 +48,10 @@ class TestLateralDelaySelection(unittest.TestCase):
     extension = CONTROLSD_EXT.read_text()
     modeld = MODELD_V2.read_text()
 
+    self.assertIn('self.CP.brand == "mazda" and bool(self.CP.flags & MazdaFlags.STEER_TO_ZERO_EPS)', core)
     self.assertIn("lat_delay = self.lat_delay + LAT_SMOOTH_SECONDS", core)
-    self.assertNotIn('lat_delay = self.sm["lateralDelay"].lateralDelay + LAT_SMOOTH_SECONDS', core)
+    # Non-donor Mazda, Suburban and all other cars keep the baseline selection.
+    self.assertIn('lat_delay = self.sm["lateralDelay"].lateralDelay + LAT_SMOOTH_SECONDS', core)
     self.assertIn("self.LaC.extension.update_lateral_lag(self.lat_delay)", core)
     self.assertIn('self.lat_delay = get_lat_delay(self.params, sm["lateralDelay"].lateralDelay)', extension)
     self.assertIn('model.lat_delay = get_lat_delay(params, sm["lateralDelay"].lateralDelay)', modeld)
