@@ -144,7 +144,11 @@ class Controls(ControlsExt):
     else:
       new_desired_curvature = model_v2.action.desiredCurvature if CC.latActive else self.curvature
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
-    lat_delay = self.sm["lateralDelay"].lateralDelay + LAT_SMOOTH_SECONDS
+    # Keep the torque controller on the same live/fixed base delay selected by
+    # modeld. ControlsExt periodically refreshes self.lat_delay through
+    # get_lat_delay(), and passes it to the torque extension above.
+    # The model-specific smoothing horizon remains a separate concern.
+    lat_delay = self.lat_delay + LAT_SMOOTH_SECONDS
 
     actuators.curvature = self.desired_curvature
     steer, lateral_output, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
