@@ -1,6 +1,7 @@
 """Regression coverage for validated, vehicle-scoped speed-bin cache restoration."""
 import math
 from types import SimpleNamespace
+from typing import cast
 import unittest
 from unittest.mock import patch
 
@@ -8,6 +9,8 @@ from opendbc.car import structs
 from opendbc.car.gm.values import CAR as GM
 from opendbc.car.mazda.values import CAR as MAZDA, MazdaFlags
 
+from openpilot.common.filter_simple import FirstOrderFilter
+from openpilot.common.params import Params
 from openpilot.selfdrive.locationd.torqued import MIN_FILTER_DECAY, VERSION, get_torque_cache_keys
 from openpilot.sunnypilot.selfdrive.locationd.torqued_ext import TorqueEstimatorExt, get_speed_dep_cache_key
 
@@ -20,14 +23,6 @@ class FakeParams:
   def get(self, key, return_default=False, block=False):
     self.gets.append(key)
     return self.values.get(key)
-
-
-class Filter:
-  def __init__(self, value):
-    self.x = value
-
-  def update_alpha(self, _value):
-    pass
 
 
 class Bucket:
@@ -49,14 +44,15 @@ def estimator(CP=None, enabled=True):
   ext = TorqueEstimatorExt.__new__(TorqueEstimatorExt)
   ext.speed_binned = enabled
   ext.CP = CP or car_params(MAZDA.MAZDA_CX9, "mazda", True)
-  ext._params = FakeParams()
+  ext._params = cast(Params, FakeParams())
   ext.speed_dep_seed_version = 1
   ext.speed_bin_centers = [6.5, 9.5, 12.0, 16.4, 21.0, 28.0, 35.0]
   ext.speed_bin_bounds = [(0.0, 1.0)] * 7
   ext.speed_bin_lat_accel_factor_bounds = [(2.0, 6.0)] * 7
   ext.speed_bin_friction_bounds = [(0.05, 0.2)] * 7
   ext.speed_bin_filtered = [
-    {"latAccelFactor": Filter(4.005), "frictionCoefficient": Filter(0.1073333333)} for _ in range(7)
+    {"latAccelFactor": FirstOrderFilter(4.005, MIN_FILTER_DECAY, 0.05),
+     "frictionCoefficient": FirstOrderFilter(0.1073333333, MIN_FILTER_DECAY, 0.05)} for _ in range(7)
   ]
   ext.speed_bin_points = [Bucket() for _ in range(7)]
   ext.speed_bin_decays = [MIN_FILTER_DECAY] * 7
