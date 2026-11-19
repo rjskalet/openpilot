@@ -8,7 +8,7 @@ from collections import Counter, defaultdict
 import math
 
 # SunnyPilot reference artifacts against which the November 2026 review was performed.
-REFERENCE_COMMIT = "c6e564cdcd68dc6334381ac0d929133b1d824479"
+REFERENCE_COMMIT = "9489b2f4815c463baa32439a46566f342b4500d3"
 MAZDA_ROUTE = "regenACF84CCF482|2024-08-30--03-21-55--0"
 EXPECTED_PAIRS = {(MAZDA_ROUTE, "card"), (MAZDA_ROUTE, "controlsd")}
 
