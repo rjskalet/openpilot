@@ -26,6 +26,8 @@ DEFAULT_SPEED_BIN_CENTERS = [6.5, 10.0, 15.0, 21.0, 26.5, 32.0, 37.5]
 # restore path reads them, so the wire copy leaves them empty. See docs/zoompilot/lateral-tune.md.
 LIVE_TORQUE_PARAMETERS_SP_SERVICE = "customReserved19"
 LIVE_TORQUE_PARAMETERS_SP_KEY = "LiveTorqueParametersSP"
+SUBURBAN_CAMERA_ACC = "CHEVROLET_SUBURBAN_CAMERA_11TH_GEN"
+SUBURBAN_MAX_LEARNING_SPEED = 38.0  # retain measured vehicle-only learning cap
 LiveTorqueParametersSP = custom.CustomReserved19
 
 
@@ -110,15 +112,28 @@ class SpeedBinLearner:
       for i in range(n_bins)
     ]
     # the fits are clipped to +-sanity of the seed, as upstream clips its global fit
-    self.speed_bin_lat_accel_factor_bounds = [
-      ((1.0 - self.factor_sanity) * factor, (1.0 + self.factor_sanity) * factor)
-      for factor in ref_lafs
-    ]
+    self.speed_bin_lat_accel_factor_bounds = self._get_speed_bin_lat_accel_factor_bounds(ref_lafs)
     self.speed_bin_friction_bounds = [
       ((1.0 - self.friction_sanity) * f, (1.0 + self.friction_sanity) * f)
       for f in ref_frictions
     ]
     self._restore_ext_cache()
+
+  def _get_speed_bin_lat_accel_factor_bounds(self, ref_lafs):
+    """Keep the original Suburban's configurable lower factor floor.
+
+    Other brands retain ZoomPilot's default +/- factor_sanity range.
+    This parameter defaults to 1.0, so a Suburban bin cannot learn below
+    its measured seed unless the user explicitly adjusts the floor.
+    """
+    suburban_floor = None
+    if self.CP.carFingerprint == SUBURBAN_CAMERA_ACC:
+      suburban_floor = float(self._params.get("SuburbanFactorFloorScale", return_default=True))
+    return [
+      ((factor * suburban_floor if suburban_floor is not None else (1.0 - self.factor_sanity) * factor),
+       (1.0 + self.factor_sanity) * factor)
+      for factor in ref_lafs
+    ]
 
   def _make_speed_bin_bucket(self):
     """One speed bin's buckets. Each bin sees a fraction of the data, so the per-bucket
@@ -137,6 +152,8 @@ class SpeedBinLearner:
   def _on_torque_point(self, steer, lateral_acc, vego):
     """Routes a quality-filtered point from handle_log to its speed bin."""
     if not self.speed_binned:
+      return
+    if self.CP.carFingerprint == SUBURBAN_CAMERA_ACC and vego > SUBURBAN_MAX_LEARNING_SPEED:
       return
     for i, (lo, hi) in enumerate(self.speed_bin_bounds):
       if lo <= vego < hi:
