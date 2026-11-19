@@ -85,6 +85,33 @@ def get_torque_cache_pair(params, CP):
 
 
 
+def save_torque_cache(params, CP, cache_bytes):
+  """Write the compatible shared cache plus a validated vehicle-specific pair.
+
+  Never overwrite a Suburban/CX-9 pair with stale CarParams from another car.
+  """
+  params.put("LiveTorqueParameters", cache_bytes)
+  torque_key, cp_key = get_torque_cache_keys(CP)
+  if torque_key == "LiveTorqueParameters":
+    return
+
+  cp_bytes = params.get("CarParams")
+  if not cp_bytes:
+    cloudlog.warning(f"no current CarParams to cache alongside {torque_key}")
+    return
+  try:
+    with car.CarParams.from_bytes(cp_bytes) as stored_cp:
+      match = TorqueEstimator.get_restore_key(stored_cp, VERSION) == TorqueEstimator.get_restore_key(CP, VERSION)
+  except Exception:
+    cloudlog.exception(f"could not validate CarParams for {torque_key}")
+    return
+  if not match:
+    cloudlog.warning(f"refusing to overwrite {torque_key} with mismatched CarParams")
+    return
+  params.put(cp_key, cp_bytes)
+  params.put(torque_key, cache_bytes)
+
+
 def slope2rot(slope):
   sin = np.sqrt(slope ** 2 / (slope ** 2 + 1))
   cos = np.sqrt(1 / (slope ** 2 + 1))
@@ -331,19 +358,7 @@ def main(demo=False):
     # vehicle's learned fit and matching CarParams in its own namespace.
     if sm.frame % 240 == 0:
       msg = estimator.get_msg(valid=sm.all_checks(), with_points=True)
-      msg_bytes = msg.to_bytes()
-      params.put("LiveTorqueParameters", msg_bytes)
-
-      torque_cache_key, car_params_cache_key = get_torque_cache_keys(estimator.CP)
-      if torque_cache_key != "LiveTorqueParameters":
-        current_car_params = params.get("CarParams")
-        if current_car_params is not None:
-          # CarParams first so an interrupted write fails restore-key validation,
-          # rather than associating a new torque blob with the previous car.
-          params.put(car_params_cache_key, current_car_params)
-          params.put(torque_cache_key, msg_bytes)
-        else:
-          cloudlog.warning(f"no CarParams to cache alongside {torque_cache_key}")
+      save_torque_cache(params, estimator.CP, msg.to_bytes())
 
 
 if __name__ == "__main__":
