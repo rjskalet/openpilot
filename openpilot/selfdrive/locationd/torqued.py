@@ -38,6 +38,52 @@ MIN_ENGAGE_BUFFER = 2  # secs
 VERSION = 1  # bump this to invalidate old parameter caches
 ALLOWED_CARS = ['toyota', 'hyundai', 'rivian', 'honda', 'volkswagen']
 
+SUBURBAN_FINGERPRINT = "CHEVROLET_SUBURBAN_CAMERA_11TH_GEN"
+MAZDA_CX9_FINGERPRINTS = {"MAZDA_CX9", "MAZDA_CX9_2021"}
+SUBURBAN_TORQUE_CACHE_KEY = "LiveTorqueParametersSuburban"
+SUBURBAN_CAR_PARAMS_CACHE_KEY = "LiveTorqueCarParamsSuburban"
+MAZDA_TORQUE_CACHE_KEY = "LiveTorqueParametersMazda"
+MAZDA_CAR_PARAMS_CACHE_KEY = "LiveTorqueCarParamsMazda"
+
+
+def get_torque_cache_keys(CP):
+  if CP.carFingerprint == SUBURBAN_FINGERPRINT:
+    return SUBURBAN_TORQUE_CACHE_KEY, SUBURBAN_CAR_PARAMS_CACHE_KEY
+  if CP.carFingerprint in MAZDA_CX9_FINGERPRINTS:
+    return MAZDA_TORQUE_CACHE_KEY, MAZDA_CAR_PARAMS_CACHE_KEY
+  return "LiveTorqueParameters", "CarParamsPrevRoute"
+
+
+def get_torque_cache_pair(params, CP):
+  """Read this vehicle's torque/CarParams pair, migrating a matching shared pair once.
+
+  Do not import a global cache from the other car. Restore-key validation remains
+  in TorqueEstimator.__init__ and SpeedBinLearner._restore_ext_cache.
+  """
+  torque_key, car_params_key = get_torque_cache_keys(CP)
+  torque_cache = params.get(torque_key)
+  params_cache = params.get(car_params_key)
+
+  if torque_key != "LiveTorqueParameters" and (not torque_cache or not params_cache):
+    legacy_torque = params.get("LiveTorqueParameters")
+    legacy_params = params.get("CarParamsPrevRoute")
+    if legacy_torque and legacy_params:
+      try:
+        with log.Event.from_bytes(legacy_torque) as evt:
+          cache_version = evt.lateralTorqueParameters.version
+        with car.CarParams.from_bytes(legacy_params) as prev:
+          matching = TorqueEstimator.get_restore_key(prev, cache_version) == TorqueEstimator.get_restore_key(CP, VERSION)
+        if matching:
+          params.put(car_params_key, legacy_params)
+          params.put(torque_key, legacy_torque)
+          params_cache, torque_cache = legacy_params, legacy_torque
+          cloudlog.info(f"migrated matching {CP.carFingerprint} torque cache to vehicle-specific storage")
+      except Exception:
+        cloudlog.exception(f"failed to migrate global torque cache for {CP.carFingerprint}")
+
+  return torque_cache, params_cache
+
+
 
 def slope2rot(slope):
   sin = np.sqrt(slope ** 2 / (slope ** 2 + 1))
@@ -102,11 +148,12 @@ class TorqueEstimator(ParameterEstimator, TorqueEstimatorExt):
     self.min_friction = (1.0 - self.friction_sanity) * self.offline_friction
     self.max_friction = (1.0 + self.friction_sanity) * self.offline_friction
 
-    # try to restore cached params
+    # Restore from the current vehicle's own namespace. Preserve the upstream
+    # restore key and filtering logic below; a matching global pair is migrated once.
     params = Params()
     self.params = params
-    params_cache = params.get("CarParamsPrevRoute")
-    torque_cache = params.get("LiveTorqueParameters")
+    torque_cache, params_cache = get_torque_cache_pair(params, CP)
+    torque_cache_key, _ = get_torque_cache_keys(CP)
     if params_cache is not None and torque_cache is not None:
       try:
         with log.Event.from_bytes(torque_cache) as log_evt:
@@ -124,10 +171,10 @@ class TorqueEstimator(ParameterEstimator, TorqueEstimatorExt):
           initial_params['points'] = cached_points
           self.decay = cache_ltp.decay
           self.filtered_points.load_points(cached_points)
-          cloudlog.info("restored torque params from cache")
+          cloudlog.info(f"restored torque params from {torque_cache_key}")
       except Exception:
-        cloudlog.exception("failed to restore cached torque params")
-        params.remove("LiveTorqueParameters")
+        cloudlog.exception(f"failed to restore cached torque params from {torque_cache_key}")
+        params.remove(torque_cache_key)
 
     self.filtered_params = {}
     for param in initial_params:
@@ -280,10 +327,23 @@ def main(demo=False):
     if sm.frame % 5 == 0:
       pm.send('lateralTorqueParameters', estimator.get_msg(valid=sm.all_checks(), with_points=DEBUG))
 
-    # Cache points every 60 seconds while onroad
+    # Keep upstream's global cache for compatibility while persisting each
+    # vehicle's learned fit and matching CarParams in its own namespace.
     if sm.frame % 240 == 0:
       msg = estimator.get_msg(valid=sm.all_checks(), with_points=True)
-      params.put("LiveTorqueParameters", msg.to_bytes())
+      msg_bytes = msg.to_bytes()
+      params.put("LiveTorqueParameters", msg_bytes)
+
+      torque_cache_key, car_params_cache_key = get_torque_cache_keys(estimator.CP)
+      if torque_cache_key != "LiveTorqueParameters":
+        current_car_params = params.get("CarParams")
+        if current_car_params is not None:
+          # CarParams first so an interrupted write fails restore-key validation,
+          # rather than associating a new torque blob with the previous car.
+          params.put(car_params_cache_key, current_car_params)
+          params.put(torque_cache_key, msg_bytes)
+        else:
+          cloudlog.warning(f"no CarParams to cache alongside {torque_cache_key}")
 
 
 if __name__ == "__main__":
