@@ -58,3 +58,7 @@ requires_steer_to_zero = true
 [MAZDA_6]
 substitute = "MAZDA_CX5_2022"
 requires_steer_to_zero = true
+
+# Original measured Suburban camera-ACC torque bins; kept separate from Mazda.
+[CHEVROLET_SUBURBAN_CAMERA_11TH_GEN]
+speed_bp =
