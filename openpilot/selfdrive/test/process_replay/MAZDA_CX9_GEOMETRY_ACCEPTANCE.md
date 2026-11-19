@@ -13,7 +13,7 @@ center of gravity or tire stiffness.
 
 ## Reproduction and findings
 
-- Reference: SunnyPilot `c6e564cdcd68dc6334381ac0d929133b1d824479`.
+- Reference: SunnyPilot `9489b2f4815c463baa32439a46566f342b4500d3`.
 - Complete replay job: https://github.com/rjskalet/openpilot/actions/runs/43772507310
 - Previous reviewed reference: PR #22, whose 1,293 changed-value entries in the same `card` and `controlsd` comparisons are byte-for-byte identical in the GitHub job logs. New SunnyPilot reference is pinned above.
 - Segment: `regenACF84CCF482|2024-08-30--03-21-55--0` (2021 CX-9).
@@ -68,3 +68,22 @@ or deploy solely because this replay exception passes.
 ## PR #26 acceptance restoration
 
 The November 15, 2026 workflow failed only because the strict replay acceptance gate from PR #22 was not transferred to PR #26 when rebasing on the SunnyPilot-first foundation. Raw GitHub Actions logs for the two PRs contain identical ordered 1,293 changed-value entries (1,287 `controlsd`, six `card`) for the same 2021 CX-9 segment. The 64 other process comparisons passed and no execution error occurred. This restoration updates the reference commit to the new upstream SunnyPilot pin without regenerating golden output or changing any vehicle controller code. The reference pin and all count/value checks remain strict, so any future change fails closed. This is still not hardware, donor-EPS, or driving validation.
+
+### November 18 reference artifact reconciliation
+
+SunnyPilot's process-replay artifact baseline advanced from `c6e564cdcd68dc6334381ac0d929133b1d824479` to
+`9489b2f4815c463baa32439a46566f342b4500d3` after the earlier review. The two intervening upstream
+commits modify only model download management and model-selection UI/tests,
+not Mazda carParams, controlsd, torque-control, or process-replay logic.
+
+Compared the complete ordered `diff.txt` changed-value entries from the original
+reviewed full replay (GitHub Actions run `43772507310`, old reference) against
+PR #28's full replay (run `44430425874`, new reference): all **1,293 of
+1,293** entries matched exactly. Both runs report **2 changed, 64 passed,
+0 errors**. The 1,293 changes remain subject to the unchanged field/count,
+finite-value, magnitude, sign, torque, geometry, saturation, and reference
+identity checks in `accepted_deltas.py`. This correction changes **only**
+the required artifact commit identity, not the acceptance thresholds or the
+underlying golden data. A fresh complete CI run must still pass before this
+software-only replay exception is considered accepted; this is not donor-EPS
+hardware validation or permission to engage steering.
