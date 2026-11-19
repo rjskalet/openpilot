@@ -30,6 +30,20 @@ SUBURBAN_CAMERA_ACC = "CHEVROLET_SUBURBAN_CAMERA_11TH_GEN"
 SUBURBAN_MAX_LEARNING_SPEED = 38.0  # retain measured vehicle-only learning cap
 LiveTorqueParametersSP = custom.CustomReserved19
 
+LIVE_TORQUE_PARAMETERS_SP_SUBURBAN_KEY = "LiveTorqueParametersSPSuburban"
+LIVE_TORQUE_PARAMETERS_SP_MAZDA_KEY = "LiveTorqueParametersSPMazda"
+MAZDA_CX9_FINGERPRINTS = {"MAZDA_CX9", "MAZDA_CX9_2021"}
+
+
+def get_speed_dep_cache_key(CP):
+  """Legacy namespace routing for the Suburban and both CX-9 fingerprints."""
+  if CP.carFingerprint == SUBURBAN_CAMERA_ACC:
+    return LIVE_TORQUE_PARAMETERS_SP_SUBURBAN_KEY
+  if CP.carFingerprint in MAZDA_CX9_FINGERPRINTS:
+    return LIVE_TORQUE_PARAMETERS_SP_MAZDA_KEY
+  return LIVE_TORQUE_PARAMETERS_SP_KEY
+
+
 
 def _torqued():
   # torqued imports this module through torqued_ext, so its names resolve at call time
@@ -192,29 +206,47 @@ class SpeedBinLearner:
     if not self.speed_binned:
       return
     try:
-      if cache_ltp is None:
-        cache = self._params.get("LiveTorqueParameters")
-        if not cache:
-          return
-        with log.Event.from_bytes(cache) as evt:
-          cache_ltp = evt.lateralTorqueParameters
-      if cache_CP is None:
-        params_cache = self._params.get("CarParamsPrevRoute")
-        if not params_cache:
-          cloudlog.info("speed-dep: no CarParamsPrevRoute, restarting learning")
-          return
-        with car.CarParams.from_bytes(params_cache) as msg:
-          cache_CP = msg
       torqued = _torqued()
       restore_key = torqued.TorqueEstimator.get_restore_key
+      # The fork learner initializes before torqued's global-fit restoration.
+      # Resolve the same matched pair (and one-time migration) for both paths.
+      if cache_ltp is None or cache_CP is None:
+        torque_cache, params_cache = torqued.get_torque_cache_pair(self._params, self.CP)
+        if cache_ltp is None:
+          if not torque_cache:
+            return
+          with log.Event.from_bytes(torque_cache) as evt:
+            cache_ltp = evt.lateralTorqueParameters
+        if cache_CP is None:
+          if not params_cache:
+            cloudlog.info("speed-dep: no matching saved vehicle CarParams, restarting learning")
+            return
+          with car.CarParams.from_bytes(params_cache) as msg:
+            cache_CP = msg
 
       if restore_key(cache_CP, cache_ltp.version) != restore_key(self.CP, torqued.VERSION):
         cloudlog.info("speed-dep: cache restore key mismatch, restarting learning")
         return
+      migrated_speed_bin_cache = None
       if cache_sp is None:
-        cache = self._params.get(LIVE_TORQUE_PARAMETERS_SP_KEY)
+        sp_cache_key = get_speed_dep_cache_key(self.CP)
+        cache = self._params.get(sp_cache_key)
+        if not cache and sp_cache_key != LIVE_TORQUE_PARAMETERS_SP_KEY:
+          # Only migrate the global speed-bin blob if its *global* companion
+          # CarParams + torque cache match this vehicle. A dedicated global-fit
+          # pair must never lend another vehicle's speed-bin points to this one.
+          global_torque = self._params.get("LiveTorqueParameters")
+          global_params = self._params.get("CarParamsPrevRoute")
+          if global_torque and global_params:
+            with log.Event.from_bytes(global_torque) as evt:
+              global_version = evt.lateralTorqueParameters.version
+            with car.CarParams.from_bytes(global_params) as msg:
+              global_matches = restore_key(msg, global_version) == restore_key(self.CP, torqued.VERSION)
+            if global_matches:
+              cache = self._params.get(LIVE_TORQUE_PARAMETERS_SP_KEY)
+              migrated_speed_bin_cache = cache
         if not cache:
-          cloudlog.info("speed-dep: no LiveTorqueParametersSP cache, restarting learning")
+          cloudlog.info(f"speed-dep: no {sp_cache_key} cache, restarting learning")
           return
         with log.Event.from_bytes(cache) as evt:
           cache_sp = getattr(evt, LIVE_TORQUE_PARAMETERS_SP_SERVICE)
@@ -263,7 +295,10 @@ class SpeedBinLearner:
       for filters, bin_decay in zip(self.speed_bin_filtered, self.speed_bin_decays, strict=True):
         filters['latAccelFactor'].update_alpha(bin_decay)
         filters['frictionCoefficient'].update_alpha(bin_decay)
-      cloudlog.info(f"restored speed-bin torque params from cache: bins {np.flatnonzero(restored).tolist()} learned")
+      if migrated_speed_bin_cache is not None:
+        # Persist only after version, seed, bin layout and value checks succeed.
+        self._params.put(get_speed_dep_cache_key(self.CP), migrated_speed_bin_cache)
+      cloudlog.info(f"restored speed-bin torque params from {get_speed_dep_cache_key(self.CP)}: bins {np.flatnonzero(restored).tolist()} learned")
     except Exception:
       cloudlog.exception("speed-dep: failed to restore cache")
 
@@ -373,4 +408,8 @@ class SpeedBinLearner:
         self._pm = messaging.PubMaster([LIVE_TORQUE_PARAMETERS_SP_SERVICE])
       self._pm.send(LIVE_TORQUE_PARAMETERS_SP_SERVICE, self._sp_msg(msg.valid, values, with_points=False))
     if with_points and self.speed_binned:
-      self._params.put(LIVE_TORQUE_PARAMETERS_SP_KEY, self._sp_msg(msg.valid, values, with_points=True).to_bytes())
+      cache_bytes = self._sp_msg(msg.valid, values, with_points=True).to_bytes()
+      self._params.put(LIVE_TORQUE_PARAMETERS_SP_KEY, cache_bytes)
+      sp_cache_key = get_speed_dep_cache_key(self.CP)
+      if sp_cache_key != LIVE_TORQUE_PARAMETERS_SP_KEY:
+        self._params.put(sp_cache_key, cache_bytes)
