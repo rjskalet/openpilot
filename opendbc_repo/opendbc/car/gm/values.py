@@ -214,6 +214,13 @@ class CAR(Platforms):
     GMCarSpecs(wheelbase=2.94, steerRatio=17.3, centerToFrontRatio=0.5, tireStiffnessFactor=1.0),
   )
 
+  # 2016–20 camera-harness Suburban with factory GM ACC. Kept distinct from
+  # the existing non-ACC platform so the stock cruise and network path match.
+  CHEVROLET_SUBURBAN_CAMERA_11TH_GEN = GMPlatformConfig(
+    [GMCarDocs("Chevrolet Suburban Camera Harness 2016-20", "Adaptive Cruise Control (ACC) & LKAS")],
+    CarSpecs(mass=2731, wheelbase=3.302, steerRatio=17.3, centerToFrontRatio=0.49),
+  )
+
   # port extensions
   # Separate car def is required when there is no ASCM
   # (for now) unless there is a way to detect it when it has been unplugged...
@@ -343,10 +350,13 @@ EV_CAR = {CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_2019, CAR.CHEVROLET_BOLT_EUV,
           CAR.CHEVROLET_BOLT_NON_ACC, CAR.CHEVROLET_BOLT_NON_ACC_1ST_GEN, CAR.CHEVROLET_BOLT_NON_ACC_2ND_GEN}
 
 # We're integrated at the camera with VOACC on these cars (instead of ASCM w/ OBD-II harness)
-CAMERA_ACC_CAR = {CAR.CHEVROLET_BOLT_EUV, CAR.CHEVROLET_SILVERADO, CAR.CHEVROLET_EQUINOX, CAR.CHEVROLET_TRAILBLAZER, CAR.GMC_YUKON}
+CAMERA_ACC_CAR = {
+  CAR.CHEVROLET_BOLT_EUV, CAR.CHEVROLET_SILVERADO, CAR.CHEVROLET_EQUINOX,
+  CAR.CHEVROLET_TRAILBLAZER, CAR.GMC_YUKON, CAR.CHEVROLET_SUBURBAN_CAMERA_11TH_GEN,
+}
 
 # Alt ASCMActiveCruiseControlStatus
-ALT_ACCS = {CAR.GMC_YUKON}
+ALT_ACCS = {CAR.GMC_YUKON, CAR.CHEVROLET_SUBURBAN_CAMERA_11TH_GEN}
 
 # We're integrated at the Safety Data Gateway Module on these cars
 SDGM_CAR = {CAR.CADILLAC_XT4, CAR.CHEVROLET_VOLT_2019, CAR.CHEVROLET_TRAVERSE}
