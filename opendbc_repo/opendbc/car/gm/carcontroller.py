@@ -4,7 +4,7 @@ from opendbc.car import Bus, DT_CTRL, structs
 from opendbc.car.lateral import apply_driver_steer_torque_limits
 from opendbc.car.gm import gmcan
 from opendbc.car.common.conversions import Conversions as CV
-from opendbc.car.gm.values import DBC, CanBus, CarControllerParams, CruiseButtons
+from opendbc.car.gm.values import DBC, CAR, CanBus, CarControllerParams, CruiseButtons
 from opendbc.car.interfaces import CarControllerBase
 
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
@@ -71,6 +71,10 @@ class CarController(CarControllerBase):
         self.lka_steering_cmd_counter = CS.pt_lka_steering_cmd_counter + 1
 
       if CC.latActive:
+        if self.CP.carFingerprint == CAR.CHEVROLET_SUBURBAN_CAMERA_11TH_GEN and CS.lkas_rejected:
+          # A rejected command was not applied to the rack; do not slew the
+          # next request from a previously commanded-but-undelivered value.
+          self.apply_torque_last = 0
         new_torque = int(round(actuators.torque * self.params.STEER_MAX))
         apply_torque = apply_driver_steer_torque_limits(new_torque, self.apply_torque_last, CS.out.steeringTorque, self.params)
       else:
