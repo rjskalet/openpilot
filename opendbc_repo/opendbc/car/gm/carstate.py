@@ -3,7 +3,7 @@ from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
-from opendbc.car.gm.values import DBC, AccState, CruiseButtons, STEER_THRESHOLD, SDGM_CAR, ALT_ACCS, GMFlags
+from opendbc.car.gm.values import DBC, CAR, CanBus, AccState, CruiseButtons, STEER_THRESHOLD, SDGM_CAR, ALT_ACCS, GMFlags
 
 from opendbc.sunnypilot.car.gm.carstate_ext import CarStateExt
 from opendbc.sunnypilot.car.gm.values_ext import GMFlagsSP
@@ -13,6 +13,7 @@ TransmissionType = structs.CarParams.TransmissionType
 NetworkLocation = structs.CarParams.NetworkLocation
 
 STANDSTILL_THRESHOLD = 10 * 0.0311
+REJECTED_LOOPBACK = "rejectedLoopback"  # historical dropped-CAN feedback for custom Suburban only
 
 BUTTONS_DICT = {CruiseButtons.RES_ACCEL: ButtonType.accelCruise, CruiseButtons.DECEL_SET: ButtonType.decelCruise,
                 CruiseButtons.MAIN: ButtonType.mainCruise, CruiseButtons.CANCEL: ButtonType.cancel}
@@ -29,6 +30,7 @@ class CarState(CarStateBase, CarStateExt):
 
     self.loopback_lka_steering_cmd_updated = False
     self.loopback_lka_steering_cmd_ts_nanos = 0
+    self.lkas_rejected = 0
     self.pt_lka_steering_cmd_counter = 0
     self.cam_lka_steering_cmd_counter = 0
     self.buttons_counter = 0
@@ -63,6 +65,12 @@ class CarState(CarStateBase, CarStateExt):
     self.loopback_lka_steering_cmd_updated = len(loopback_cp.vl_all["ASCMLKASteeringCmd"]["RollingCounter"]) > 0
     if self.loopback_lka_steering_cmd_updated:
       self.loopback_lka_steering_cmd_ts_nanos = loopback_cp.ts_nanos["ASCMLKASteeringCmd"]["RollingCounter"]
+    # Detect steering commands rejected by the safety path on the camera-ACC
+    # Suburban. The feedback parser is deliberately absent on other GM cars.
+    self.lkas_rejected = 0
+    if self.CP.carFingerprint == CAR.CHEVROLET_SUBURBAN_CAMERA_11TH_GEN:
+      rejected_cp = can_parsers[REJECTED_LOOPBACK]
+      self.lkas_rejected = sum(1 for torque in rejected_cp.vl_all["ASCMLKASteeringCmd"]["LKASteeringCmd"] if torque != 0)
     if self.CP.networkLocation == NetworkLocation.fwdCamera:
       self.pt_lka_steering_cmd_counter = pt_cp.vl["ASCMLKASteeringCmd"]["RollingCounter"]
       self.cam_lka_steering_cmd_counter = cam_cp.vl["ASCMLKASteeringCmd"]["RollingCounter"]
@@ -178,8 +186,13 @@ class CarState(CarStateBase, CarStateExt):
       ("ASCMLKASteeringCmd", float('nan')),
     ]
 
-    return {
+    parsers = {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, 0),
       Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], 2),
       Bus.loopback: CANParser(DBC[CP.carFingerprint][Bus.pt], loopback_messages, 128),
     }
+    if CP.carFingerprint == CAR.CHEVROLET_SUBURBAN_CAMERA_11TH_GEN:
+      parsers[REJECTED_LOOPBACK] = CANParser(
+        DBC[CP.carFingerprint][Bus.pt], [("ASCMLKASteeringCmd", float('nan'))], CanBus.DROPPED,
+      )
+    return parsers
