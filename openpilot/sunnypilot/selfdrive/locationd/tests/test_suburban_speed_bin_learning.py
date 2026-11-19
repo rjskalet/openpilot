@@ -37,7 +37,8 @@ def test_suburban_factor_floor_is_retained(factor, floor):
 def test_other_cars_keep_unmodified_zoompilot_sanity_bounds():
   obj = fake_learner("MAZDA_CX9")
   bounds = SpeedBinLearner._get_speed_bin_lat_accel_factor_bounds(obj, [2.0])
-  assert bounds == pytest.approx([(1.4, 2.6)])
+  assert bounds[0][0] == pytest.approx(1.4)
+  assert bounds[0][1] == pytest.approx(2.6)
 
 
 @pytest.mark.parametrize("fingerprint,speed,expected_points", [
