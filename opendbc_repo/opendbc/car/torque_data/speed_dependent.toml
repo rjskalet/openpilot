@@ -61,4 +61,7 @@ requires_steer_to_zero = true
 
 # Original measured Suburban camera-ACC torque bins; kept separate from Mazda.
 [CHEVROLET_SUBURBAN_CAMERA_11TH_GEN]
-speed_bp =
+speed_bp = [6.5, 9.5, 12.0, 16.4, 21.0, 28.0, 35.0]
+laf_bp = [0.680, 0.680, 0.680, 0.435, 0.469, 0.378, 0.413]
+friction_bp = [0.205, 0.205, 0.205, 0.195, 0.208, 0.181, 0.135]
+seed_version = 1
