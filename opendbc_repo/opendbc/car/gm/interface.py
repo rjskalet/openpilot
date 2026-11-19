@@ -134,6 +134,11 @@ class CarInterface(CarInterfaceBase, CarInterfaceExt):
       if candidate in ALT_ACCS:
         ret.alphaLongitudinalAvailable = False
         ret.openpilotLongitudinalControl = False
+        if candidate == CAR.CHEVROLET_SUBURBAN_CAMERA_11TH_GEN:
+          # Preserve this vehicle's factory GM ACC even if alpha_long was
+          # requested upstream; never leave camera-longitudinal safety set.
+          ret.pcmCruise = True
+          ret.safetyConfigs[0].safetyParam &= ~GMSafetyFlags.HW_CAM_LONG.value
         ret.minEnableSpeed = -1.  # engage speed is decided by PCM
 
     else:  # ASCM, OBD-II harness
@@ -226,6 +231,13 @@ class CarInterface(CarInterfaceBase, CarInterfaceExt):
     elif candidate == CAR.CHEVROLET_TRAVERSE:
       ret.steerActuatorDelay = 0.2
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+
+    elif candidate == CAR.CHEVROLET_SUBURBAN_CAMERA_11TH_GEN:
+      # Preserve measured Suburban torque seed, steering response and stock
+      # camera-ACC minimum steering speed; no zero-speed steering.
+      ret.steerActuatorDelay = 0.2
+      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+      ret.lateralTuning.torque.latAccelOffset = 0.0
 
     elif candidate == CAR.GMC_YUKON:
       ret.steerActuatorDelay = 0.5
