@@ -84,15 +84,33 @@ class TestSpeedDepConfig:
     monkeypatch.setattr(mod, 'get_speed_dep_config', lambda: {'MAZDA_CX9_2021': {'speed_bp': [10.0], 'laf_bp': [1.0], 'seed_version': 3}})
     assert get_speed_dep_config_for_car(brand_cp(**STOCK_MAZDA)) == {'seed_version': 3}
 
-  SWAP_CHASSIS = [CAR.MAZDA_CX5_KE, CAR.MAZDA_CX5, CAR.MAZDA_CX9, CAR.MAZDA_3, CAR.MAZDA_6]
+  SWAP_CHASSIS = [CAR.MAZDA_CX5_KE, CAR.MAZDA_CX5, CAR.MAZDA_3, CAR.MAZDA_6]
 
   @pytest.mark.parametrize("platform", SWAP_CHASSIS)
   def test_swapped_chassis_take_the_donor_table(self, platform):
-    # the donor EPS is the one the CX-5 2022 bins were learned behind
+    # chassis without CX-9-specific measured bins borrow the CX-5 donor-EPS table
     cfg = get_speed_dep_config_for_car(swapped_cp(platform))
     cx5_2022 = get_speed_dep_config_for_car(cx5_2022_cp())
     for key in ('speed_bp', 'laf_bp', 'friction_bp', 'seed_version'):
       assert cfg[key] == cx5_2022[key], key
+
+  def test_swapped_cx9_uses_its_measured_cx9_donor_eps_table(self):
+    # The 2018 CX-9 has a chassis-specific donor-EPS tune; don't silently borrow
+    # the CX-5 2022's different learned low-speed torque and friction.
+    cfg = get_speed_dep_config_for_car(swapped_cp(CAR.MAZDA_CX9))
+    cx9 = get_speed_dep_config()['MAZDA_CX9_2021']
+    cx5 = get_speed_dep_config()['MAZDA_CX5_2022']
+    for key in ('speed_bp', 'laf_bp', 'friction_bp', 'seed_version'):
+      assert cfg[key] == cx9[key], key
+    assert cfg['requires_steer_to_zero'] is True
+    assert cfg['laf_bp'][0] != cx5['laf_bp'][0]
+    # The changed seed version and bin layout reject a current CX-5 cache on restore.
+    assert cfg['seed_version'] != cx5['seed_version']
+    assert len(cfg['speed_bp']) != len(cx5['speed_bp'])
+
+  def test_swapped_cx9_table_withheld_on_stock_eps(self):
+    cfg = get_speed_dep_config_for_car(brand_cp(brand="mazda", fingerprint=str(CAR.MAZDA_CX9), min_steer_speed=20.0))
+    assert cfg == {}
 
   @pytest.mark.parametrize("platform", SWAP_CHASSIS)
   def test_swapped_chassis_entries_withheld_on_the_stock_eps(self, platform):
