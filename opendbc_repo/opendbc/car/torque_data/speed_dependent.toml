@@ -36,9 +36,9 @@ seed_version = 1
 # The CX-9 2021 seeds stand in until a CX-8 has learned its own.
 substitute = "MAZDA_CX9_2021"
 
-# Chassis behind a CX-5 2022 donor EPS: the KE, and any the engine-firmware swap fallback
-# names. They take the CX-5 2022 table, learned behind that EPS, until one learns its own; the
-# stock EPS on each keeps the steering floor and gets none.
+# Other chassis behind a CX-5 2022 donor EPS: the KE, and the engine-firmware
+# swap fallbacks that lack a chassis-specific learned table. These borrow the
+# CX-5 table; stock EPS steering floors are still respected.
 [MAZDA_CX5_KE]
 substitute = "MAZDA_CX5_2022"
 requires_steer_to_zero = true
@@ -47,8 +47,10 @@ requires_steer_to_zero = true
 substitute = "MAZDA_CX5_2022"
 requires_steer_to_zero = true
 
+# CX-9 2016-20 behind the 2022 donor EPS shares the measured CX-9 donor-EPS
+# calibration, not the CX-5 chassis calibration. Keep the stock-EPS floor gate.
 [MAZDA_CX9]
-substitute = "MAZDA_CX5_2022"
+substitute = "MAZDA_CX9_2021"
 requires_steer_to_zero = true
 
 [MAZDA_3]
