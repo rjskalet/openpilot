@@ -112,3 +112,20 @@ jobs:
             finally:
               lib.params_destroy(handle)
           PY
+
+      - name: Install Mazda and Suburban cache regression dependencies
+        shell: bash
+        run: |
+          python3 -m venv /tmp/pr31-cache-venv
+          /tmp/pr31-cache-venv/bin/pip install --disable-pip-version-check --only-binary=:all: pytest numpy pycapnp pycryptodome tqdm cffi
+
+      - name: Test independent Mazda and Suburban cache routing and restoration
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONPATH="$PWD:$PWD/opendbc_repo:$PWD/msgq_repo"
+          /tmp/pr31-cache-venv/bin/python -m pytest -q \
+            openpilot/sunnypilot/selfdrive/locationd/tests/test_vehicle_torque_cache_routing.py \
+            openpilot/sunnypilot/selfdrive/locationd/tests/test_suburban_speed_bin_learning.py \
+            openpilot/sunnypilot/selfdrive/locationd/tests/test_torqued_cache_restore.py \
+            openpilot/sunnypilot/selfdrive/locationd/tests/test_torqued_speed_dep.py
