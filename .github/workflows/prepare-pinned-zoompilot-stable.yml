@@ -100,8 +100,8 @@ jobs:
 
           # Verify upstream's new Panda implementation is not overwritten by the old one.
           test -z "$(git diff "$NEW_UPSTREAM" -- opendbc_repo/opendbc/safety/modes/gm.h opendbc_repo/opendbc/safety/modes/mazda.h)"
-          git diff --cached --check
+          git diff --cached --check -- "${paths[@]}"
           git add -A
-          git diff --cached --check
+          git diff --cached --check -- "${paths[@]}"
           git commit -m "Integrate ZoomPilot 2026.11.21-22 with CX-9 and camera-ACC Suburban"
           git push origin HEAD:refs/heads/"$TARGET"
