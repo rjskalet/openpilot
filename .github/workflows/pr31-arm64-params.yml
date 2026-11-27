@@ -117,7 +117,7 @@ jobs:
         shell: bash
         run: |
           python3 -m venv /tmp/pr31-cache-venv
-          /tmp/pr31-cache-venv/bin/pip install --disable-pip-version-check --only-binary=:all: pytest numpy pycapnp pycryptodome tqdm cffi
+          /tmp/pr31-cache-venv/bin/pip install --disable-pip-version-check --only-binary=:all: pytest numpy pycapnp pycryptodome tqdm cffi zstandard pyzmq setproctitle requests
 
       - name: Test independent Mazda and Suburban cache routing and restoration
         shell: bash
