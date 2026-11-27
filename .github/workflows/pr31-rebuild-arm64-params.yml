@@ -1,0 +1,172 @@
+name: PR31 rebuild and validate ARM64 Params library
+
+on:
+  push:
+    branches:
+      - integration/zoompilot-stable-20261121-dual-vehicle
+    paths:
+      - .github/workflows/pr31-rebuild-arm64-params.yml
+
+permissions:
+  contents: write
+
+jobs:
+  rebuild-params:
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned native build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = aarch64
+          sudo apt-get update
+          sudo apt-get install -y clang libzmq3-dev libjson11-1-dev binutils cmake
+          curl --fail --location --retry 3 --silent --show-error \
+            https://capnproto.org/capnproto-c++-1.0.1.tar.gz \
+            -o /tmp/capnproto-c++-1.0.1.tar.gz
+          tar xzf /tmp/capnproto-c++-1.0.1.tar.gz -C /tmp
+          grep -q '#define CAPNP_VERSION_MAJOR 1' /tmp/capnproto-c++-1.0.1/src/capnp/common.h
+          grep -q '#define CAPNP_VERSION_MINOR 0' /tmp/capnproto-c++-1.0.1/src/capnp/common.h
+          grep -q '#define CAPNP_VERSION_MICRO 1' /tmp/capnproto-c++-1.0.1/src/capnp/common.h
+          mkdir -p /tmp/pr31-headers/json11
+          json11_header="$(dpkg -L libjson11-1-dev | grep '/json11.hpp' | head -n1)"
+          test -n "$json11_header"
+          ln -sf "$json11_header" /tmp/pr31-headers/json11/json11.hpp
+          git clone --depth 1 --branch v4.3.5 --quiet https://github.com/zeromq/libzmq.git /tmp/pr31-libzmq
+          cmake -S /tmp/pr31-libzmq -B /tmp/pr31-libzmq-build \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DBUILD_SHARED=OFF -DBUILD_STATIC=ON -DZMQ_BUILD_TESTS=OFF \
+            -DWITH_OPENPGM=OFF -DWITH_NORM=OFF -DWITH_GSSAPI_KRB5=OFF \
+            -DWITH_LIBSODIUM=OFF -DENABLE_CURVE=OFF -DENABLE_WS=OFF -DENABLE_DRAFTS=OFF
+          cmake --build /tmp/pr31-libzmq-build --parallel 2
+
+      - name: Build ARM64 Params native library from PR31 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/pr31-params
+          static_zmq="$(find /tmp/pr31-libzmq-build -name libzmq.a -print -quit)"
+          test -s "$static_zmq"
+          clang++ -std=c++17 -O2 -g -fPIC -shared \
+            -D__COMMA_HARDWARE__ -mcpu=cortex-a57 \
+            -Wl,--no-undefined -Wl,--as-needed -pthread \
+            -I/tmp/capnproto-c++-1.0.1/src -I/tmp/pr31-headers -I/tmp/pr31-libzmq/include \
+            -I. -Iopenpilot -Iopenpilot/cereal/gen/cpp \
+            openpilot/common/params_c.cc \
+            openpilot/common/params.cc \
+            openpilot/common/swaglog.cc \
+            openpilot/common/util.cc \
+            openpilot/common/ratekeeper.cc \
+            openpilot/common/yuv.cc \
+            "$static_zmq" -Wl,-Bstatic -ljson11 -Wl,-Bdynamic \
+            -o /tmp/pr31-params/libparams_c.so
+
+      - name: Verify exact registry, ABI, dependencies, defaults and native round trips
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import ctypes
+          import pathlib
+          import re
+          import struct
+          import subprocess
+          import tempfile
+
+          old=pathlib.Path('openpilot/common/libparams_c.so')
+          new=pathlib.Path('/tmp/pr31-params/libparams_c.so')
+          header=pathlib.Path('openpilot/common/params_keys.h').read_text()
+          entries=re.findall(r'^\s*\{"([^"]+)",\s*\{',header,flags=re.M)
+          source=set(entries)
+          assert len(source)==len(entries) and len(source)>300
+          print('SOURCE_KEYS',len(source))
+          for p in (old,new):
+            raw=p.read_bytes()
+            assert raw.startswith(b'\x7fELF') and struct.unpack('<H',raw[18:20])[0]==183
+          def required_versions(p,kind):
+            data=subprocess.check_output(['readelf','--version-info',str(p)],text=True)
+            return {tuple(map(int,x.split('.'))) for x in re.findall(rf'{kind}_([0-9]+(?:\.[0-9]+)+)',data)}
+          for kind in ('GLIBC','GLIBCXX','CXXABI'):
+            a=required_versions(old,kind)
+            b=required_versions(new,kind)
+            print(kind,'old=',max(a,default=None),'new=',max(b,default=None))
+            assert not b or (a and max(b)<=max(a)), f'{kind} version requirement increased'
+          def needed(p):
+            return set(re.findall(r'\(NEEDED\).*?\[(.*?)\]',subprocess.check_output(['readelf','-d',str(p)],text=True)))
+          existing=needed(old)
+          updated=needed(new)
+          print('old NEEDED:',sorted(existing),'new NEEDED:',sorted(updated))
+          assert updated <= existing | {'ld-linux-aarch64.so.1'}, 'unapproved shared library dependencies'
+          def symbols(p):
+            s=subprocess.check_output(['nm','-D','--defined-only',str(p)],text=True)
+            return set(re.findall(r'^\S+\s+\w\s+(params_\w+)$',s,re.M))
+          assert not symbols(old)-symbols(new), 'Params C ABI exports removed'
+          class Buffer(ctypes.Structure):
+            _fields_=[('data',ctypes.c_void_p),('size',ctypes.c_size_t)]
+          lib=ctypes.CDLL(str(new))
+          lib.params_create.argtypes=[ctypes.c_char_p,ctypes.c_size_t]
+          lib.params_create.restype=ctypes.c_void_p
+          lib.params_destroy.argtypes=[ctypes.c_void_p]
+          lib.params_keys_size.argtypes=[ctypes.c_void_p]
+          lib.params_keys_size.restype=ctypes.c_size_t
+          lib.params_key_at.argtypes=[ctypes.c_void_p,ctypes.c_size_t]
+          lib.params_key_at.restype=Buffer
+          lib.params_check_key.argtypes=[ctypes.c_void_p,ctypes.c_char_p]
+          lib.params_check_key.restype=ctypes.c_bool
+          lib.params_get_key_type.argtypes=[ctypes.c_void_p,ctypes.c_char_p]
+          lib.params_get_key_type.restype=ctypes.c_int
+          lib.params_get_default.argtypes=[ctypes.c_void_p,ctypes.c_char_p]
+          lib.params_get_default.restype=Buffer
+          lib.params_put.argtypes=[ctypes.c_void_p,ctypes.c_char_p,ctypes.c_char_p,ctypes.c_size_t,ctypes.c_bool]
+          lib.params_put.restype=ctypes.c_int
+          lib.params_get.argtypes=[ctypes.c_void_p,ctypes.c_char_p,ctypes.c_bool]
+          lib.params_get.restype=Buffer
+          def value(v):
+            return ctypes.string_at(v.data,v.size) if v.data else None
+          with tempfile.TemporaryDirectory() as d:
+            h=lib.params_create(d.encode(),len(d.encode()))
+            assert h, 'Failed to create native Params instance'
+            try:
+              count=lib.params_keys_size(h)
+              compiled=set(value(lib.params_key_at(h,i)).decode() for i in range(count))
+              print('REBUILT_KEYS',count,'MISSING',sorted(source-compiled),'UNEXPECTED',sorted(compiled-source))
+              assert count==len(compiled)==len(source) and compiled==source
+              keys={
+                'LiveTorqueParametersMazda':6,
+                'LiveTorqueCarParamsMazda':6,
+                'LiveTorqueParametersSPMazda':6,
+                'LiveTorqueParametersSuburban':6,
+                'LiveTorqueCarParamsSuburban':6,
+                'LiveTorqueParametersSPSuburban':6,
+                'SuburbanFactorFloorScale':3,
+              }
+              for key,typ in keys.items():
+                k=key.encode()
+                assert lib.params_check_key(h,k) and lib.params_get_key_type(h,k)==typ,key
+                if typ==6:
+                  sample=b'\x00PR31-cache-\xff'+k
+                  assert lib.params_put(h,k,sample,len(sample),True)==0,key
+                  assert value(lib.params_get(h,k,False))==sample,key
+              assert value(lib.params_get_default(h,b'SuburbanFactorFloorScale'))==b'1.0'
+              print('PASS: ARM64 ABI, dependencies, exact registry, key types/default, cache round trips')
+            finally:
+              lib.params_destroy(h)
+          PY
+
+      - name: Commit tested binary to PR31 branch only
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp /tmp/pr31-params/libparams_c.so openpilot/common/libparams_c.so
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f openpilot/common/libparams_c.so
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo "No native library change necessary"
+            exit 0
+          fi
+          git commit -m "build: synchronize ARM64 Params binary with 310-key source registry"
+          git push origin HEAD:refs/heads/integration/zoompilot-stable-20261121-dual-vehicle
