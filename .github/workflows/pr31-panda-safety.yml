@@ -1,0 +1,35 @@
+name: PR31 Mazda and GM Panda safety tests
+
+on:
+  push:
+    branches:
+      - integration/zoompilot-stable-20261121-dual-vehicle
+
+permissions:
+  contents: read
+
+jobs:
+  panda-safety:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install focused safety test dependencies
+        shell: bash
+        run: |
+          python -m venv /tmp/pr31-safety-venv
+          /tmp/pr31-safety-venv/bin/pip install --disable-pip-version-check --only-binary=:all: numpy pycapnp pycryptodome tqdm cffi
+      - name: Compile current upstream Panda safety and run Mazda plus GM tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONPATH="$PWD:$PWD/opendbc_repo:$PWD/msgq_repo"
+          cd opendbc_repo
+          SAFETY_COVERAGE=0 /tmp/pr31-safety-venv/bin/python -m unittest -v \
+            opendbc.safety.tests.test_gm \
+            opendbc.safety.tests.test_mazda
