@@ -1,0 +1,107 @@
+name: Prepare pinned ZoomPilot stable dual-vehicle port
+
+on:
+  push:
+    branches:
+      - integration/zoompilot-stable-20261121-dual-vehicle
+
+permissions:
+  contents: write
+
+jobs:
+  stage:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply vehicle-specific differences onto pinned stable snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          OLD=5bda2ae44a540a27bd8e9d6dad9314c2821940f0
+          OLD_UPSTREAM=b51270b7b00a5b0a2b78c3acfdbca4be236ad255
+          NEW_UPSTREAM=62258a0d7ca1cbcf2267013bf2f77319fddb3ba0
+          TARGET=integration/zoompilot-stable-20261121-dual-vehicle
+
+          git fetch origin master
+          test "$(git rev-parse origin/master)" = "$OLD" || { echo "STOP: working master moved"; exit 1; }
+          git merge-base --is-ancestor "$OLD_UPSTREAM" "$OLD" || { echo "STOP: old base is not ancestor"; exit 1; }
+          git fetch --no-tags https://github.com/zoompilot/zoompilot.git main
+          test "$(git rev-parse FETCH_HEAD)" = "$NEW_UPSTREAM" || { echo "STOP: ZoomPilot stable changed"; exit 1; }
+
+          # Only the proven custom vehicle files; do not import the old Panda safety files
+          # or an older, architecture-specific libparams_c.so binary.
+          paths=(
+            opendbc_repo/opendbc/car/car_helpers.py
+            opendbc_repo/opendbc/car/gm/carcontroller.py
+            opendbc_repo/opendbc/car/gm/carstate.py
+            opendbc_repo/opendbc/car/gm/interface.py
+            opendbc_repo/opendbc/car/gm/tests/test_suburban_camera_acc.py
+            opendbc_repo/opendbc/car/gm/values.py
+            opendbc_repo/opendbc/car/tests/test_gm_suburban_camera.py
+            opendbc_repo/opendbc/car/torque_data/override.toml
+            opendbc_repo/opendbc/car/torque_data/speed_dependent.toml
+            opendbc_repo/opendbc/sunnypilot/car/tests/test_speed_dep_config.py
+            openpilot/common/params_keys.h
+            openpilot/selfdrive/locationd/torqued.py
+            openpilot/sunnypilot/selfdrive/locationd/speed_bin_learner.py
+            openpilot/sunnypilot/selfdrive/locationd/tests/test_suburban_speed_bin_learning.py
+            openpilot/sunnypilot/selfdrive/locationd/tests/test_vehicle_torque_cache_routing.py
+          )
+          git diff --binary "$OLD_UPSTREAM" "$OLD" -- "${paths[@]}" > /tmp/vehicle-port.patch
+          test -s /tmp/vehicle-port.patch || { echo "STOP: vehicle patch unexpectedly empty"; exit 1; }
+          git diff --check "$OLD_UPSTREAM" "$OLD" -- "${paths[@]}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Retain this branch's current parent (which includes this one-shot action)
+          # while replacing its complete tracked tree with the pinned upstream snapshot.
+          git read-tree --reset -u "$NEW_UPSTREAM"
+          git apply --3way --index /tmp/vehicle-port.patch
+
+          # Fail closed if migration loses critical Mazda/Suburban semantics.
+          python3 - <<'PY'
+          from pathlib import Path
+          import ast, tomllib
+          sd=tomllib.loads(Path("opendbc_repo/opendbc/car/torque_data/speed_dependent.toml").read_text())
+          assert sd["MAZDA_CX9"]["substitute"] == "MAZDA_CX9_2021"
+          assert sd["MAZDA_CX9"]["requires_steer_to_zero"] is True
+          assert len(sd["MAZDA_CX9_2021"]["speed_bp"]) == 7
+          sub=sd["CHEVROLET_SUBURBAN_CAMERA_11TH_GEN"]
+          assert len(sub["speed_bp"]) == len(sub["laf_bp"]) == len(sub["friction_bp"]) == 7
+          values=Path("opendbc_repo/opendbc/car/gm/values.py").read_text()
+          iface=Path("opendbc_repo/opendbc/car/gm/interface.py").read_text()
+          state=Path("opendbc_repo/opendbc/car/gm/carstate.py").read_text()
+          ctrl=Path("opendbc_repo/opendbc/car/gm/carcontroller.py").read_text()
+          assert "CHEVROLET_SUBURBAN_CAMERA_11TH_GEN" in values
+          assert "CAR.CHEVROLET_SUBURBAN_CAMERA_11TH_GEN" in values
+          assert "ret.pcmCruise = True" in iface and "ret.openpilotLongitudinalControl = False" in iface
+          assert "ret.safetyConfigs[0].safetyParam &= ~GMSafetyFlags.HW_CAM_LONG.value" in iface
+          assert "REJECTED_LOOPBACK" in state and "lkas_rejected" in ctrl
+          mazda=Path("opendbc_repo/opendbc/car/mazda/values.py").read_text()
+          assert "STEER_DELTA_UP = 10" in mazda and "STEER_DELTA_DOWN = 10" in mazda
+          for name in [
+            "opendbc_repo/opendbc/car/car_helpers.py",
+            "opendbc_repo/opendbc/car/gm/carcontroller.py",
+            "opendbc_repo/opendbc/car/gm/carstate.py",
+            "opendbc_repo/opendbc/car/gm/interface.py",
+            "opendbc_repo/opendbc/car/gm/values.py",
+            "openpilot/selfdrive/locationd/torqued.py",
+            "openpilot/sunnypilot/selfdrive/locationd/speed_bin_learner.py",
+          ]:
+            ast.parse(Path(name).read_text(), filename=name)
+          print("PASS: static CX-9 calibration, Suburban GM ACC and controller syntax checks")
+          PY
+
+          # Verify upstream's new Panda implementation is not overwritten by the old one.
+          test -z "$(git diff "$NEW_UPSTREAM" -- opendbc_repo/opendbc/safety/modes/gm.h opendbc_repo/opendbc/safety/modes/mazda.h)"
+          git diff --cached --check
+          git add -A
+          git diff --cached --check
+          git commit -m "Integrate ZoomPilot 2026.11.21-22 with CX-9 and camera-ACC Suburban"
+          git push origin HEAD:refs/heads/"$TARGET"
