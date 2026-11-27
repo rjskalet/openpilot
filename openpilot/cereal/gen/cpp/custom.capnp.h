@@ -54,13 +54,13 @@ enum class AudibleAlert_878e32a6bc486e3f: uint16_t {
   DISENGAGE,
   REFUSE,
   WARNING_SOFT,
-  WARNING_IMMEDIATE,
+  WARNING_IMMEDIATE_SYSTEM,
   PROMPT,
   PROMPT_REPEAT,
   PROMPT_DISTRACTED,
   RESERVED9,
   RESERVED10,
-  RESERVED11,
+  WARNING_IMMEDIATE_USER,
   RESERVED12,
   RESERVED13,
   RESERVED14,
@@ -1366,7 +1366,7 @@ struct LongitudinalPlanZP::E2ESetSpeed {
 
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(8f7c57943ded867a, 4, 0)
+    CAPNP_DECLARE_STRUCT_HEADER(8f7c57943ded867a, 5, 0)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -7246,6 +7246,8 @@ public:
 
   inline float getFade() const;
 
+  inline float getPlanFade() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -7297,6 +7299,9 @@ public:
 
   inline float getFade();
   inline void setFade(float value);
+
+  inline float getPlanFade();
+  inline void setPlanFade(float value);
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -12645,6 +12650,20 @@ inline float LongitudinalPlanZP::E2ESetSpeed::Builder::getFade() {
 inline void LongitudinalPlanZP::E2ESetSpeed::Builder::setFade(float value) {
   _builder.setDataField<float>(
       ::capnp::bounded<7>() * ::capnp::ELEMENTS, value);
+}
+
+inline float LongitudinalPlanZP::E2ESetSpeed::Reader::getPlanFade() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
+}
+
+inline float LongitudinalPlanZP::E2ESetSpeed::Builder::getPlanFade() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS);
+}
+inline void LongitudinalPlanZP::E2ESetSpeed::Builder::setPlanFade(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<8>() * ::capnp::ELEMENTS, value);
 }
 
 }  // namespace

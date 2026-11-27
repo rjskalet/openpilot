@@ -6,7 +6,7 @@ See the LICENSE.md file in the root directory for more details.
 """
 import time
 
-import pyray as rl
+import raylib_nb as rl
 
 from openpilot.cereal import custom
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigConfirmationDialog, BigDialog
@@ -132,7 +132,7 @@ class ModelsLayoutMici(NavScroller):
     self.blendful_toggle = self._options.lane_center
 
     self.main_items = [self.current_model_info, self.select_model_btn, self.cancel_download_btn, self.blendful_toggle,
-                       *self._options.items, self.link_toggle, self._options.small_steering, self.refresh_btn, self.clear_cache_btn]
+                       *self._options.items, self.link_toggle, self._options.big_smoothing, self.refresh_btn, self.clear_cache_btn]
     self._scroller.add_widgets(self.main_items)
 
   @property

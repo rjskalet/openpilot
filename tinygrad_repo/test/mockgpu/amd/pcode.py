@@ -356,6 +356,8 @@ def _sad_u8(a: UOp, b: UOp, acc: UOp, masked: bool = False) -> UOp:
     result = result + (a_byte.ne(_u32(0)).where(diff, _u32(0)) if masked else diff)
   return result
 
+_float_binop_hook: Callable = lambda left, right, op, res: res  # the amd emulator sets the hardware's NaN rules here
+
 _FUNCS: dict[str, Callable[..., UOp]] = {
   'sqrt': lambda a: UOp(Ops.SQRT, src=(a,)), 'trunc': lambda a: UOp(Ops.TRUNC, src=(a,)),
   'log2': lambda a: UOp(Ops.LOG2, src=(a,)), 'sin': lambda a: _trig_reduce(a),
@@ -364,7 +366,8 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   'isEven': lambda a: (UOp(Ops.TRUNC, src=(a,)).cast(dtypes.int) & _const(dtypes.int, 1)).eq(_const(dtypes.int, 0)),
   'max': lambda a, b: UOp(Ops.MAX, src=(a, b)),
   'min': lambda a, b: UOp(Ops.MAX, src=(a.neg(), b.neg())).neg(),
-  'pow': lambda a, b: UOp(Ops.EXP2, src=(b.bitcast(dtypes.float32),)),
+  # pow(2.0, x): interpret the operand's float bits at its original width.
+  'pow': lambda a, b: UOp(Ops.EXP2, src=(b.bitcast({2: dtypes.half, 4: dtypes.float32, 8: dtypes.float64}[b.dtype.itemsize]),)),
   'fma': lambda a, b, c: a * b + c,
   'i32_to_f32': lambda a: a.cast(dtypes.int).cast(dtypes.float32),
   'u32_to_f32': lambda a: a.cast(dtypes.uint32).cast(dtypes.float32),
@@ -558,18 +561,20 @@ class Parser:
         return (left >> right) if op == '>>' else (left << right)
       case '+' | '-':
         if op == '-' and (lv:=_single_value(left)) is not None and (rv:=_single_value(right)) is not None: return _const(left.dtype, lv - rv)
-        return (left + right) if op == '+' else (left - right)
+        res = (left + right) if op == '+' else (left - right)
+        return _float_binop_hook(left, right, op, res) if dtypes.is_float(res.dtype) else res
       case '*' | '/':
         # Integer promotion: promote 16-bit integers to 32-bit before multiply to avoid overflow
         # (e.g. SOPP branch offset: SIMM16.i16 * 16'4 can exceed int16 range)
         if op == '*' and left.dtype.itemsize == 2 and left.dtype in (dtypes.int16, dtypes.short, dtypes.uint16, dtypes.ushort):
           pdt = dtypes.int if left.dtype in (dtypes.int16, dtypes.short) else dtypes.uint
           left, right = left.cast(pdt), right.cast(pdt)
-        if op == '*': return left * right
+        if op == '*': return _float_binop_hook(left, right, op, left * right) if dtypes.is_float(left.dtype) else left * right
         return (left // right) if dtypes.is_int(left.dtype) else (left / right)
       case '**': return UOp(Ops.EXP2, src=(right.cast(left.dtype),)) if _single_value(left) == 2.0 else left
+      case '%': return left % right
 
-  _PREC = [('||',), ('&&',), ('|',), ('^',), ('&',), ('==', '!=', '<>'), ('>=', '<=', '>', '<'), ('>>', '<<'), ('+', '-'), ('*', '/'), ('**',)]
+  _PREC = [('||',), ('&&',), ('|',), ('^',), ('&',), ('==', '!=', '<>'), ('>=', '<=', '>', '<'), ('>>', '<<'), ('+', '-'), ('*', '/', '%'), ('**',)]
 
   def binop(self, prec: int) -> UOp:
     if prec >= len(self._PREC): return self.unary()
@@ -1449,7 +1454,7 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp | int] | None = None, funcs: dic
   _, final, _ = parse_block(lines, 0, env, {**_FUNCS, **funcs} if funcs else None, assigns=assigns)
   sliced = set(d.split('[')[0] for d, _ in assigns if '[' in d)
   for var, val in final.items():
-    if var in ['D0', 'S0', 'SCC', 'VCC', 'EXEC', 'PC', 'RETURN_DATA', 'VDATA'] and isinstance(val, UOp):
+    if var in ['D0', 'S0', 'SCC', 'VCC', 'EXEC', 'PC', 'RETURN_DATA', 'VDATA', 'SDATA'] and isinstance(val, UOp):
       if var in sliced and not any(re.match(rf'{var}\.\w+\s*=', l) for l in lines): continue
       for l in lines:
         if (m := re.match(rf'{var}\.(\w+(?:\[\w+\])?)', l)):

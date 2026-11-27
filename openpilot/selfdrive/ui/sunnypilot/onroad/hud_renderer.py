@@ -4,7 +4,7 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
-import pyray as rl
+import raylib_nb as rl
 
 from openpilot.common.constants import CV
 from openpilot.selfdrive.ui import UI_BORDER_SIZE
@@ -43,7 +43,8 @@ class HudRendererSP(HudRenderer):
     self.turn_signal_controller = TurnSignalController()
     self.circular_alerts_renderer = CircularAlertsRenderer()
     self.speed_renderer = SpeedRenderer()
-    self._torque_bar = TorqueBarZP(scale=3.0, always=True, show_bar=lambda: ui_state.torque_bar)
+    self._torque_bar = TorqueBarZP(scale=3.0, always=True, show_bar=lambda: ui_state.torque_bar,
+                                   show_gauge=lambda: ui_state.lane_center_gauge)
     self._speed_assist_button = SpeedAssistButton(EXP_BUTTON_SIZE)
     self._long_indicator = LongIndicatorTizi()
     self._confidence_ball = ConfidenceBallTizi()
@@ -55,7 +56,7 @@ class HudRendererSP(HudRenderer):
     self.speed_conv: float = CV.MS_TO_KPH if ui_state.is_metric else CV.MS_TO_MPH
 
   def _update_state(self) -> None:
-    if ui_state.sm.recv_frame["carState"] < ui_state.started_frame:
+    if not ui_state.received_since_started("carState"):
       return
 
     if ui_state.CP_SP is not None:

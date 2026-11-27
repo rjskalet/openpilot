@@ -47,6 +47,7 @@ class UIStateSP(UIStateZP):
     self.screensaver_enabled: bool = False
 
     self.active_bundle = None
+    self.chestnut_downloading = False
     self.model_runner_tinygrad: bool = False
     self.active_runner_tinygrad: bool = False
     self.blindspot: bool = False
@@ -78,7 +79,7 @@ class UIStateSP(UIStateZP):
     UIStateZP.update(self)
 
   def onroad_brightness_handle_alerts(self, _ui_state, alert):
-    if _ui_state.sm.recv_frame["carState"] < _ui_state.started_frame:
+    if not _ui_state.received_since_started("carState"):
       return
 
     has_alert = _ui_state.started and self.onroad_brightness != OnroadBrightness.AUTO and alert is not None
@@ -174,8 +175,10 @@ class UIStateSP(UIStateZP):
     # runner the manager launches (process_config.is_tinygrad_model); with a chestnut the big slot decides
     self.active_runner_tinygrad = self.params.get("ModelRunnerTypeCache") == custom.ModelManagerSP.Runner.tinygrad
     # stock only counts the default big model's compiled pkl. a downloaded big bundle runs on the
-    # chestnut just the same, so ChestnutState has to see it as available too.
+    # chestnut just the same, so ChestnutState has to see it as available too
     self.chestnut_compiled = self.chestnut_compiled or self.model_runner_tinygrad
+    # the model manager downloading the chestnut's model, which the chestnut icon shows as loading
+    self.chestnut_downloading = self.params.get("Offroad_ChestnutModelDownloading") is not None
     UIStateZP.update_params(self)
     self.blindspot = self.params.get_bool("BlindSpot")
     self.chevron_metrics = self.params.get("ChevronInfo")
@@ -218,8 +221,8 @@ class UIStateSP(UIStateZP):
         self.params.put_bool("LateralJerkTorqueController", False, block=True)
         self.params.put_bool("NeuralNetworkLateralControl", False, block=True)
 
-      # Angle steering: no torque-based lateral controls
-      if CP.steerControlType == car.CarParams.SteerControlType.angle:
+      # Angle or curvature steering: no torque-based lateral controls
+      if CP.steerControlType != car.CarParams.SteerControlType.torque:
         self.params.remove("EnforceTorqueControl")
         self.params.remove("NeuralNetworkLateralControl")
         self.params.remove("LateralJerkTorqueController")
@@ -283,13 +286,18 @@ class DeviceSP:
     self._blocked_by_screensaver = False
 
   @staticmethod
-  def set_onroad_brightness(_ui_state, awake: bool, cur_brightness: float) -> float:
+  def set_onroad_brightness(_ui_state, awake: bool, cur_brightness: float, auto_floor: float, backlight_min: float) -> float:
+    """The onroad brightness setting applied to the auto brightness. auto_floor is upstream's own lowest
+    auto level: an alert never shows darker than that, whatever the setting or the timer."""
     if not awake or not _ui_state.started:
       return cur_brightness
 
+    if _ui_state.sm['selfdriveState'].alertSize != log.SelfdriveState.AlertSize.none:
+      return max(auto_floor, cur_brightness)
+
     if _ui_state.onroad_brightness_timer != 0:
       if _ui_state.onroad_brightness == OnroadBrightness.AUTO_DARK:
-        return max(30.0, cur_brightness)
+        return max(backlight_min, cur_brightness)
       return cur_brightness
 
     # 0: Auto (Default), 1: Auto (Dark), 2: Screen Off
@@ -304,7 +312,19 @@ class DeviceSP:
     return float((_ui_state.onroad_brightness - 2) * 5)
 
   @staticmethod
-  def set_min_onroad_brightness(_ui_state, min_brightness: int) -> int:
+  def backlight_and_dim(brightness: float, backlight_min: float, dims: bool) -> tuple[int, float]:
+    """(backlight, UI dim) for a brightness. Where upstream dims the UI below the backlight's floor (mici,
+    whose panel can't show a lower backlight), sunnypilot's darker settings do the same. Elsewhere (tizi,
+    which upstream never dims) they drive the backlight itself, without drawing a full-screen overlay every
+    frame. 0 is screen off: the backlight off, nothing to dim."""
+    if brightness <= 0:
+      return 0, 0.0
+    if dims:
+      return round(max(brightness, backlight_min)), max(0.0, 1 - brightness / backlight_min)
+    return round(brightness), 0.0
+
+  @staticmethod
+  def set_min_onroad_brightness(_ui_state, min_brightness: float) -> float:
     if _ui_state.onroad_brightness == OnroadBrightness.AUTO_DARK:
       min_brightness = 10
 

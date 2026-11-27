@@ -1,3 +1,61 @@
+zoompilot v2026.11.21-22
+========================
+* comma 3X: fixed "Low Communication Rate" errors caused by openpilot's UI refactor.
+* Synced with openpilot of 2026-11-20.
+* openpilot changes
+  * New driver monitoring model.
+  * Gentle slowdown for upcoming curves.
+  * Aggressive personality accelerates quicker again; here only with Set Speed Assist off.
+  * Fixed false excessive actuation alerts.
+  * comma 4: lane-wide stop bar; the wheel starts centered.
+* Slow for Curves
+  * zoompilot's curve planning now runs on every openpilot longitudinal car, not only Mazda.
+  * Banked curves are taken a little faster, off-camber ones slower.
+* Set Speed Assist: gentler pickup when engaging and when returning to your set speed.
+* Auto lane change: fixed so it only changes one lane per blinker cycle.
+
+zoompilot v2026.11.19-20
+========================
+* Synced with openpilot of 2026-11-15 and sunnypilot of 2026-11-14; updating installs AGNOS 20.6.
+* New features
+  * Curve Speed setting under Slow for Curves: Gentle, Normal or Sporty.
+  * Smooth Big Model, on by default: calms big model wiggle on straight roads.
+  * Speed Limit source is now Auto, Car or Map; Auto follows the car's sign and fills in from the map.
+* Set Speed Assist
+  * Smoother, less overshoot; eases off the gas as you near your set speed.
+  * Coasts more toward curves and slowing cars.
+  * Follows the driving personality: gentler on Relaxed, quicker on Aggressive.
+  * No onroad indicator; home and the switch alert show its state.
+* Lead Forecast
+  * Now covers radar leads, braking earlier behind slowing traffic.
+  * Pulls away sooner when the car ahead leaves a stop.
+* comma 4
+  * Side panel on the left, green wheel when engaged, night mode (openpilot).
+  * Stop bar for planned stops with no car ahead, alerts popup (openpilot).
+  * Steering-only shows the green wheel and torque bar; cruise-only dims the wheel.
+  * Longitudinal icons are hidden unless longitudinal is initialized and active.
+* Mazda
+  * Sun glare on the stock camera no longer shows "LKAS Fault: Restart the Car".
+  * Real power steering faults alert about 5 s sooner.
+  * Alpha longitudinal: less throttle lag, quicker launch from a stop.
+  * CX-5 diesels with SH56 engine and SH52 transmission firmware recognized.
+* Toyota
+  * Speed Limit Assist works at any set speed and never exceeds it; tap gas to keep your current speed.
+  * Fixed hard braking and stopping short behind a slowing car with Speed Limit Assist on.
+* Hyundai and Kia (sunnypilot)
+  * New cars: Kona 2024-25, Sonata (Hybrid) 2024-26, Tucson Hybrid 2025-26, Carnival Hybrid 2025-26, Niro Plus EV 2024.
+  * CAN FD ccNC/ccIC with camera SCC: alpha longitudinal; fixed cruise buttons on alternate-button cars.
+* chestnut and jetlink
+  * chestnut tested on hardware; the big model downloads when one connects, and home shows progress.
+  * No more ~1 s stall on the small model if the big model fails mid-drive.
+  * jetlink uses its own model index; a jetlink cable is no longer mistaken for a chestnut.
+* Fixes
+  * "TAKE CONTROL IMMEDIATELY: locationd Temporary Error" from a single dropped camera frame.
+  * Speed Limit Assist not turning on reliably on some cars.
+  * VW ID.4 and Born: Enforce Torque and NNLC removed; they broke steering.
+  * Small Model Steer removed; openpilot's low speed lateral has improved.
+  * sunnylink: Lane Center Assist can be turned on with the Default model.
+
 zoompilot v2026.11.02-18
 ========================
 * Synced with sunnypilot of 2026-10-29, through openpilot of 2026-10-16.

@@ -9,12 +9,17 @@ offroad car-default seeds. Each migration keys on a marker param without a defau
 manager_init writes every declared default to disk, so a changed default never reaches a device
 that has booted before.
 """
+from pathlib import Path
+
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.sunnypilot.selfdrive.car.mazda_torque_seed import seed_car_defaults_offroad
+from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Policy
+from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.source_auto import AUTO
 
 E2E_ASSISTS_MIGRATED = "ExperimentalAssistsDefaultOn"
 E2E_ASSISTS = ("ExperimentalModeSetSpeed",)
+OLD_LANE_CENTER_READOUT = "BlendfulReadout"
 
 
 def _migrate_e2e_assists_on(params: Params) -> None:
@@ -31,6 +36,34 @@ def _migrate_e2e_assists_on(params: Params) -> None:
     cloudlog.exception("params_migration_zp: e2e assists migration failed, retrying next boot")
 
 
+def _migrate_lane_center_ui(params: Params) -> None:
+  # LaneCenterUI was an off/gauge/debug int 2026-11-08 and became the 3X gauge's bool 2026-11-11, when
+  # the debug overlay went: a stored debug (2), which a bool read takes as off, becomes on. The comma
+  # 4's older BlendfulReadout, no longer a declared key and now read by nothing, is only removed. No
+  # marker: a restored backup can still carry either.
+  try:
+    Path(params.get_param_path(OLD_LANE_CENTER_READOUT)).unlink(missing_ok=True)
+    path = Path(params.get_param_path("LaneCenterUI"))
+    if path.is_file() and path.read_bytes().strip() == b"2":
+      params.put_bool("LaneCenterUI", True, block=True)
+      cloudlog.info("params_migration_zp: LaneCenterUI debug folded into the gauge")
+  except Exception:
+    cloudlog.exception("params_migration_zp: LaneCenterUI migration failed, retrying next boot")
+
+
+def _fold_speed_limit_sources(params: Params) -> None:
+  # Car-first, map-first and combined became one Auto source 2026-11-05. No marker: the settings
+  # can no longer write 3 or 4, but a restored backup can.
+  try:
+    if params.get("SpeedLimitPolicy", return_default=True) in (Policy.map_data_priority, Policy.combined):
+      params.put("SpeedLimitPolicy", int(AUTO), block=True)
+      cloudlog.info("params_migration_zp: SpeedLimitPolicy folded into Auto")
+  except Exception:
+    cloudlog.exception("params_migration_zp: SpeedLimitPolicy fold failed, retrying next boot")
+
+
 def run_migration_zp(params: Params) -> None:
   _migrate_e2e_assists_on(params)
+  _migrate_lane_center_ui(params)
+  _fold_speed_limit_sources(params)
   seed_car_defaults_offroad(params)

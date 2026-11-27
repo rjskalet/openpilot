@@ -91,13 +91,22 @@ class TestVolkswagenMebSafetyBase(common.CarSafetyTest, common.CurvatureSteering
     self.assertFalse(self._tx(self._curvature_cmd_msg(0, steer_req=True, power=max_power)))      # steady power
     self.assertTrue(self._tx(self._curvature_cmd_msg(0, steer_req=True, power=max_power - 1)))   # decreasing power
 
-  def _speed_msg(self, speed_mps: float):
-    spd_kph = speed_mps * 3.6
+  def test_power_mads_lateral(self):
+    max_power = self.MAX_POWER_TEST
+    self.safety.set_controls_allowed(False)
+    for controls_allowed_lateral in (False, True):
+      self._set_prev_desired_power(max_power - 1)
+      self.safety.set_controls_allowed_lateral(controls_allowed_lateral)
+      # rising power is a wind-down violation only with no lateral permission at all
+      self.assertEqual(controls_allowed_lateral, self._tx(self._curvature_cmd_msg(0, steer_req=True, power=max_power)))
+
+  def _speed_msg(self, speed: float):
+    spd_kph = speed * 3.6
     values = {f"{s}_Radgeschw": spd_kph for s in ("VL", "VR", "HL", "HR")}
     return self.packer.make_can_msg_safety("ESC_51", 0, values)
 
-  def _speed_msg_2(self, speed_mps: float):
-    values = {"ESP_v_Signal": speed_mps * 3.6}
+  def _speed_msg_2(self, speed: float):
+    values = {"ESP_v_Signal": speed * 3.6}
     return self.packer.make_can_msg_safety("ESP_21", 0, values)
 
   def _motor_14_msg(self, brake):
@@ -110,9 +119,6 @@ class TestVolkswagenMebSafetyBase(common.CarSafetyTest, common.CurvatureSteering
   def _user_gas_msg(self, gas):
     values = {"Accel_Pedal_Pressure": 1 if gas else 0, "TSK_Status": 3}
     return self.packer.make_can_msg_safety("Motor_51", 0, values)
-
-  def _vehicle_moving_msg(self, speed_mps: float):
-    return self._speed_msg(speed_mps)
 
   def _curvature_meas_msg(self, curvature):
     values = {"Curvature": abs(curvature), "Curvature_VZ": curvature > 0}
@@ -204,9 +210,10 @@ class TestVolkswagenMebSafetyBase(common.CarSafetyTest, common.CurvatureSteering
           self.assertEqual(should_rx, self._rx(msg))
 
   def test_main_switch_off_disables_controls(self):
-    self.safety.set_controls_allowed(True)
-    self._rx(self._tsk_status_msg(False, main_switch=False))
-    self.assertFalse(self.safety.get_controls_allowed())
+    for tsk_status in range(8):
+      self.safety.set_controls_allowed(True)
+      self._rx(self.packer.make_can_msg_safety("Motor_51", 0, {"TSK_Status": tsk_status}))
+      self.assertEqual(tsk_status in (2, 3, 4, 5), self.safety.get_controls_allowed())
 
   def test_cancel_button_rising_edge(self):
     self.safety.set_controls_allowed(True)
@@ -222,11 +229,11 @@ class TestVolkswagenMebSafetyBase(common.CarSafetyTest, common.CurvatureSteering
         self.safety.set_controls_allowed(True)
         self._tx(self._curvature_cmd_msg(0, steer_req=True))
 
-        within_delta = abs(speed - speed_2) <= common.MAX_SPEED_DELTA
+        within_delta = common.speeds_within_delta(speed, speed_2)
         self.assertEqual(self.safety.get_controls_allowed(), within_delta)
 
   def test_curvature_violation(self):
-    # if violation occurs, MEB resets desired_curvature_last to measured curvature
+    # if violation occurs, desired_curvature_last is reset to 0
     meas = self.MAX_CURVATURE_TEST / 4
     self.safety.set_controls_allowed(True)
     self._reset_curvature_measurement(meas)
@@ -235,8 +242,8 @@ class TestVolkswagenMebSafetyBase(common.CarSafetyTest, common.CurvatureSteering
     # cause a violation by sending a command far from prev=0
     self.assertFalse(self._tx(self._curvature_cmd_msg(self.MAX_CURVATURE_TEST, steer_req=True, power=50)))
 
-    # prev should track curvature_meas
-    self.assertEqual(self.safety.get_curvature_meas_min(), self.safety.get_desired_curvature_last())
+    # prev should be reset to 0
+    self.assertEqual(0, self.safety.get_desired_curvature_last())
 
   def test_curvature_cmd_when_not_steering(self):
     # Tests that only a zero curvature is allowed while the steer

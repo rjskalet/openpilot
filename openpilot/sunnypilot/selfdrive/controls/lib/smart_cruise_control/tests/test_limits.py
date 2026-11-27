@@ -13,6 +13,8 @@ The decel budget is the limiters' own; the SP planner lets it past upstream's A_
 import ast
 import pathlib
 
+import pytest
+
 
 from opendbc.sunnypilot.car.icbm_actuation_profile import ICBM_ACTUATION_PROFILES
 from openpilot.common.basedir import BASEDIR
@@ -45,6 +47,11 @@ class TestOpLongMirror:
     src = UPSTREAM_PLANNER.read_text()
     assert "np.interp(v_ego, J_CRUISE_BP, J_CRUISE_VALS)" in src
 
+  def test_upstream_still_smooths_the_gap_over_a_second(self):
+    # limits.py and Set Speed Assist's approach pace (e2e_set_speed/approach.py) are written against
+    # #39266's 1 s smoothing; a change there needs both looked at again
+    assert "smooth_value(v_cruise - v_ego, a_cruise_prev, tau=1.0, dt=dt)" in UPSTREAM_PLANNER.read_text()
+
   def test_limiter_budget_is_past_upstreams_cruise_floor(self):
     # SCC keeps its 1.2 m/s^2 (LongitudinalPlannerSP.update_cruise_accel); a set-speed drop and SLA
     # coast at upstream's gentler floor
@@ -75,3 +82,10 @@ class TestStockTrackingGap:
     mph = 1. / limits._MPH_PER_MS
     assert lim.dash_traversal_time(4. * mph) == 4. / lim.walk_rate
     assert lim.dash_traversal_time(30. * mph) == lim.track_gap / lim.walk_rate
+
+  def test_a_metric_dash_walks_more_units_for_the_same_gap(self):
+    from opendbc.car import structs
+    lim = limits.get_planning_limits(structs.CarParams(brand="mazda", openpilotLongitudinalControl=False))
+    mph = 1. / limits._MPH_PER_MS
+    for gap in (4., 30.):
+      assert lim.dash_traversal_time(gap * mph, is_metric=True) == pytest.approx(limits._KPH_PER_MPH * lim.dash_traversal_time(gap * mph))

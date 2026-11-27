@@ -36,7 +36,6 @@ from openpilot.common.version import terms_version, training_version, get_build_
 ThermalStatus = log.DeviceState.ThermalStatus
 NetworkType = log.DeviceState.NetworkType
 NetworkStrength = log.DeviceState.NetworkStrength
-CURRENT_TAU = 15.   # 15s time constant
 TEMP_TAU = 5.   # 5s time constant
 DISCONNECT_TIMEOUT = 5.  # wait 5 seconds before going offroad after disconnect so you get an alert
 PANDA_STATES_TIMEOUT = round(1000 / SERVICE_LIST['pandaStates'].frequency * 1.5)  # 1.5x the expected pandaState frequency
@@ -323,7 +322,7 @@ def hardware_thread(end_event, hw_queue) -> None:
     chestnut_status.update(started_ts is None or not onroad_conditions["ignition"], branch, last_hw_state.usb_state, chestnut.failed,
                            params.get_bool("ChestnutLoading"), params.get("ChestnutActive"),
                            chestnut_state if chestnut_valid else None, set_offroad_alert_if_changed)
-    ext.alerts(set_offroad_alert_if_changed)
+    ext.alerts(set_offroad_alert_if_changed, msg.deviceState)
     # this subset is only used for offroad
     temp_sources = [
       msg.deviceState.memoryTempC,
@@ -370,9 +369,6 @@ def hardware_thread(end_event, hw_queue) -> None:
     startup_conditions["device_temp_engageable"] = thermal_status < ThermalStatus.overheated
 
     startup_conditions["not_flashing_chestnut"] = not chestnut.flashing
-
-    # ensure device is fully booted
-    startup_conditions["device_booted"] = startup_conditions.get("device_booted", False) or HARDWARE.booted()
 
     # user-forced status
     offroad_mode = params.get_bool("OffroadMode")

@@ -1,5 +1,5 @@
 import numpy as np
-import pyray as rl
+import raylib_nb as rl
 from openpilot.cereal import log
 from openpilot.cereal.visionipc import VisionStreamType
 from openpilot.selfdrive.ui import UI_BORDER_SIZE
@@ -89,7 +89,6 @@ class AugmentedRoadView(CameraView, AugmentedRoadViewSP):
 
     # Draw all UI overlays
     self.model_renderer.render(self._content_rect)
-    AugmentedRoadViewSP.update_fade_out_bottom_overlay(self, self._content_rect)
     self._hud_renderer.render(self._content_rect)
     self.alert_renderer.render(self._content_rect)
     self.driver_state_renderer.render(self._content_rect)
