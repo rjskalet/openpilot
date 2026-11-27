@@ -71,22 +71,24 @@ def _bundle_is_valid_locally(bundle: custom.ModelManagerSP.ModelBundle) -> bool:
              for file_name, expected_hash in _bundle_artifacts(bundle))
 
 
+def _matching_bundle(active_bundle: custom.ModelManagerSP.ModelBundle,
+                     available_bundles: list[custom.ModelManagerSP.ModelBundle]) -> "custom.ModelManagerSP.ModelBundle | None":
+  for bundle in available_bundles:
+    if active_bundle.ref and bundle.ref:
+      if active_bundle.ref == bundle.ref:
+        return bundle
+    elif active_bundle.internalName == bundle.internalName:
+      return bundle
+  return None
+
+
 def _bundle_needs_reset(active_bundle: custom.ModelManagerSP.ModelBundle, available_bundles: list[custom.ModelManagerSP.ModelBundle] | None,
                         check_files: bool) -> bool:
   if active_bundle is None:
     return False
 
   if available_bundles is not None:
-    matching_bundle = None
-    for bundle in available_bundles:
-      if active_bundle.ref and bundle.ref:
-        if active_bundle.ref == bundle.ref:
-          matching_bundle = bundle
-          break
-      elif active_bundle.internalName == bundle.internalName:
-        matching_bundle = bundle
-        break
-
+    matching_bundle = _matching_bundle(active_bundle, available_bundles)
     if matching_bundle is None:
       return True
     if active_bundle.minimumSelectorVersion != matching_bundle.minimumSelectorVersion:
@@ -124,7 +126,9 @@ def get_active_source(chestnut: bool | None = None, chestnut_active: bool | None
 
 def get_active_bundle(params: Params | None = None, *, chestnut: bool | None = None) -> "custom.ModelManagerSP.ModelBundle | None":
   # no cross-slot fallback: an empty active slot means the hardware default, which
-  # only stock modeld can run - modeld_v2 requires a real bundle
+  # only stock modeld can run - modeld_v2 requires a real bundle. zoompilot leaves the
+  # built-in big pkl out, so a chestnut's empty slot gets the Default bundle downloaded
+  # instead (ModelManagerSP._fetch_big_model_files)
   params = params or Params()
   source = get_active_source(chestnut=chestnut)
   bundle = get_selected_bundle(params, source)
@@ -135,9 +139,9 @@ def get_active_bundle(params: Params | None = None, *, chestnut: bool | None = N
 
 def _big_files_ready(params: Params, bundle: custom.ModelManagerSP.ModelBundle) -> bool:
   """A chestnut pick whose files are not all here, or are being fetched again,
-  runs as the Default big model until the manager has them
-  (ModelManagerSP._fetch_big_model_files). Upstream resets the pick instead;
-  keeping it and driving the Default meanwhile loses neither. Existence only:
+  is not run until the manager has them (ModelManagerSP._fetch_big_model_files):
+  stock modeld drives meanwhile, on the small model where the built-in big pkl is
+  left out (zoompilot). Upstream resets the pick instead; keeping it loses nothing. Existence only:
   this is asked every manager tick, and the manager hashes them once per ref."""
   downloading = params.get("ModelManager_DownloadRef")
   if isinstance(downloading, bytes):
@@ -175,6 +179,16 @@ def _validate_active_bundle(params: Params, source: str, available_bundles: list
     return None
 
   active_bundle = _parse_active_bundle(raw_bundle)
+  if source == "chestnut" and active_bundle is not None and available_bundles and _bundle_needs_reset(active_bundle, available_bundles, False) \
+     and (listed := _matching_bundle(active_bundle, available_bundles)) is not None:
+    # the catalog lists the big pick under another entry (jetlink's list in place of sunnypilot's, or
+    # a rebuild): the slot takes the new entry in place. Emptied, even for the tick before the pick is
+    # carried over, jetlink would take it for the Default chosen and pick that on the Jetson too
+    cloudlog.warning(f"Active model bundle for {source} is listed anew; updating it in place")
+    listed.status = custom.ModelManagerSP.DownloadStatus.downloaded
+    params.put(key, listed.to_dict(), block=True)
+    _LAST_VALIDATED_RAW[key] = params.get(key)
+    return None
   if active_bundle is None or _bundle_needs_reset(active_bundle, available_bundles, check_files):
     cloudlog.warning(f"Active model bundle invalid for {source}; resetting to default")
     params.remove(key)

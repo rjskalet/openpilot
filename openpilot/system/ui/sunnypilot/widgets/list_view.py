@@ -6,7 +6,7 @@ See the LICENSE.md file in the root directory for more details.
 """
 from collections.abc import Callable, Sequence
 
-import pyray as rl
+import raylib_nb as rl
 from openpilot.common.params import Params
 from openpilot.system.ui.lib.application import gui_app, MousePos, FontWeight, TextAlignment, TextAlignmentVertical
 from openpilot.system.ui.lib.text_measure import measure_text_cached
@@ -140,6 +140,11 @@ class MultipleButtonActionSP(MultipleButtonAction):
   def set_enabled_buttons(self, indices: set[int] | None):
     self.enabled_buttons = indices
 
+  def _update_state(self):
+    # follow the param when something else writes it, or a tap would write the old choice back
+    if self.param_key:
+      self.set_selected_button(int(self.params.get(self.param_key, return_default=True)))
+
   def _render(self, rect: rl.Rectangle):
 
     button_y = rect.y + (rect.height - style.BUTTON_HEIGHT) / 2
@@ -192,7 +197,7 @@ class MultipleButtonActionSP(MultipleButtonAction):
       button_x = self._rect.x + i * self.button_width
       button_rect = rl.Rectangle(button_x, button_y, self.button_width, style.BUTTON_HEIGHT)
 
-      if rl.check_collision_point_rec(mouse_pos, button_rect):
+      if rl.check_collision_point_rec(rl.Vector2(mouse_pos.x, mouse_pos.y), button_rect):
         # Check if this specific button is enabled
         if self.enabled_buttons is not None and i not in self.enabled_buttons:
           return
@@ -202,7 +207,7 @@ class MultipleButtonActionSP(MultipleButtonAction):
           self.callback(i)
 
     if self.param_key:
-      self.params.put(self.param_key, self.selected_button)
+      self.params.put(self.param_key, self.selected_button, block=True)  # _update_state re-reads it next frame
 
 
 class ListItemSP(ListItem):

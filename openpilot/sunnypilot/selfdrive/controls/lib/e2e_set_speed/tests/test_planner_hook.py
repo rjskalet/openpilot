@@ -10,12 +10,12 @@ import numpy as np
 import pytest
 
 from openpilot.cereal import messaging
-from openpilot.selfdrive.controls.lib.accel_boost import AccelBoost
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import T_IDXS as T_IDXS_MPC
-from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlanner, LongitudinalPlanSource
+from openpilot.selfdrive.controls.lib.longitudinal_planner import AGGRESSIVE_ACCEL_BOOST, LongitudinalPlanner, LongitudinalPlanSource
 from openpilot.sunnypilot.selfdrive.car.tests.fakes import FakeParams
 from openpilot.sunnypilot.selfdrive.controls.lib.tests.test_experimental_gate import build_planner, build_sm
-from openpilot.sunnypilot.selfdrive.controls.lib.e2e_set_speed.controller import E2ESetSpeedController, Inhibit, approach_accel
+from openpilot.sunnypilot.selfdrive.controls.lib.e2e_set_speed.approach import approach_accel
+from openpilot.sunnypilot.selfdrive.controls.lib.e2e_set_speed.controller import E2ESetSpeedController, Inhibit
 
 MODEL_ACCEL = 0.
 
@@ -63,7 +63,8 @@ def run_planner(enabled: bool, frames: int = 200) -> LongitudinalPlanner:
 def test_off_is_upstream():
   planner = run_planner(False)
   assert planner.mpc.source == LongitudinalPlanSource.e2e
-  assert planner.output_a_target == pytest.approx(MODEL_ACCEL)
+  # the fixture's personality is the default, Aggressive, so upstream's boost is on the model's accel
+  assert planner.output_a_target == pytest.approx(MODEL_ACCEL + AGGRESSIVE_ACCEL_BOOST)
   assert planner.e2e_set_speed.inhibit == Inhibit.disabled
 
 
@@ -71,7 +72,7 @@ def test_on_raises_the_e2e_candidate():
   planner = run_planner(True)
   assert planner.e2e_set_speed.inhibit == Inhibit.none
   # the model holding at 0 under the set speed: lifted at the approach pace, below the cruise law's
-  approach = approach_accel(planner.v_ego, planner.output_v_target)
+  approach = approach_accel(planner.v_ego, planner.output_v_target, planner_sm()['selfdriveState'].personality.raw)
   assert planner.e2e_set_speed.lift == pytest.approx(approach)
   assert planner.output_a_target == pytest.approx(approach)
   assert planner.a_cruise > 1. > approach
@@ -100,35 +101,28 @@ def test_plan_reports_the_floor():
   assert (report.gain, report.fade) == (1., 1.)
 
 
-def test_throttle_probability_reaches_the_floor():
-  planner = run_planner(True, frames=0)
+def run_aggressive(enabled: bool, boost: float, monkeypatch, frames: int = 200) -> LongitudinalPlanner:
+  from openpilot.cereal import log
+  from openpilot.selfdrive.controls.lib import longitudinal_planner
+  monkeypatch.setattr(longitudinal_planner, 'AGGRESSIVE_ACCEL_BOOST', boost)
+  planner = build_planner()
+  no_lead_mpc(planner.mpc)
+  planner.e2e_set_speed = E2ESetSpeedController(params=FakeParams(ExperimentalModeSetSpeed=enabled))
   sm = planner_sm()
-  model = sm['modelV2'].as_builder()
-  model.meta.disengagePredictions.gasPressProbs = [0.9, 0.25, 0.1]
-  sm['modelV2'] = model.as_reader()
-  for _ in range(200):
-    planner.update(sm)
-  assert planner.e2e_set_speed.gain == pytest.approx(0.25)
-  assert planner.e2e_set_speed.lift == pytest.approx(0.25 * planner.e2e_set_speed.floor, rel=1e-3)
-
-
-def gas_pressed_planner(enabled: bool) -> LongitudinalPlanner:
-  """Model-limited with the gas held: upstream's boost latches eligibility, then learns."""
-  planner = run_planner(enabled, frames=0)
-  planner.accel_boost.total_boost = 0.1
-  planner.accel_boost.boost_eligible = True
-  sm = planner_sm()
-  car_state = sm['carState'].as_builder()
-  car_state.gasPressed = True
-  sm['carState'] = car_state.as_reader()
-  for _ in range(50):
+  ss = sm['selfdriveState'].as_builder()
+  ss.personality = log.LongitudinalPersonality.aggressive
+  sm['selfdriveState'] = ss.as_reader()
+  for _ in range(frames):
     planner.update(sm)
   return planner
 
 
-def test_gas_boost_only_without_the_floor():
-  # the names the hook writes: a rename upstream must fail here, not silently boost again
-  assert {'total_boost', 'boost_eligible'} <= set(vars(AccelBoost()))
-  assert gas_pressed_planner(False).accel_boost.total_boost > 0.1
-  on = gas_pressed_planner(True).accel_boost
-  assert (on.total_boost, on.boost_eligible) == (0., False)
+def test_aggressive_boost_only_with_assist_off(monkeypatch):
+  # upstream's Aggressive boost: on the model's accel with Set Speed Assist off, none of it with it on
+  off = run_aggressive(False, 0.1, monkeypatch)
+  assert off.output_a_target == pytest.approx(MODEL_ACCEL + 0.1)
+  on = run_aggressive(True, 0.1, monkeypatch)
+  unboosted = run_aggressive(True, 0., monkeypatch)
+  assert on.e2e_set_speed.inhibit == Inhibit.none
+  assert on.output_a_target == pytest.approx(unboosted.output_a_target)
+  assert on.e2e_set_speed.lift == pytest.approx(unboosted.e2e_set_speed.lift)

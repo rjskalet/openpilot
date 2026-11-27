@@ -113,10 +113,10 @@ enum class EventName_91f1992a1f77fb03: uint16_t {
   STEER_TIME_LIMIT,
   VEHICLE_SENSORS_INVALID,
   LOCATIOND_TEMPORARY_ERROR,
-  LOCATIOND_PERMANENT_ERROR,
+  LOCATIOND_PERMANENT_ERROR_D_E_P_R_E_C_A_T_E_D,
   PARAMSD_TEMPORARY_ERROR,
-  PARAMSD_PERMANENT_ERROR,
-  ACTUATORS_API_UNAVAILABLE,
+  PARAMSD_PERMANENT_ERROR_D_E_P_R_E_C_A_T_E_D,
+  ACTUATORS_API_UNAVAILABLE_D_E_P_R_E_C_A_T_E_D,
   ESP_ACTIVE,
   PERSONALITY_CHANGED,
   AEB,
@@ -132,6 +132,7 @@ enum class EventName_91f1992a1f77fb03: uint16_t {
   BIG_MODEL_FAILED,
   CAR_NOT_READY,
   USER_BOOKMARK_NOT_PAIRED,
+  STARTUP_CRUISE_CANCELED,
 };
 CAPNP_DECLARE_ENUM(EventName, 91f1992a1f77fb03);
 CAPNP_DECLARE_SCHEMA(d692e23d1a247d99);
@@ -291,24 +292,28 @@ enum class FaultType_cd55c07f69249798: uint16_t {
   INTERRUPT_RATE_GMLAN_D_E_P_R_E_C_A_T_E_D,
   INTERRUPT_RATE_INTERRUPTS,
   INTERRUPT_RATE_SPI_DMA,
-  INTERRUPT_RATE_SPI_CS,
-  INTERRUPT_RATE_UART1,
-  INTERRUPT_RATE_UART2,
-  INTERRUPT_RATE_UART3,
-  INTERRUPT_RATE_UART5,
-  INTERRUPT_RATE_UART_DMA,
+  SELF_TEST_CPU,
+  SELF_TEST_RAM,
+  SELF_TEST_FLASH,
+  ECC,
+  OUTPUT_READBACK,
+  DMA,
   INTERRUPT_RATE_USB,
-  INTERRUPT_RATE_TIM1,
-  INTERRUPT_RATE_TIM3,
+  CLOCK,
+  INTERRUPT_MISSING,
   REGISTER_DIVERGENT,
   INTERRUPT_RATE_KLINE_INIT,
   INTERRUPT_RATE_CLOCK_SOURCE,
   INTERRUPT_RATE_TICK,
   INTERRUPT_RATE_EXTI,
   INTERRUPT_RATE_SPI,
-  INTERRUPT_RATE_UART7,
+  ADC,
   SIREN_MALFUNCTION,
   HEARTBEAT_LOOP_WATCHDOG,
+  INTERRUPT_RATE_SOUND_DMA,
+  MPU,
+  TIMER,
+  SAFETY_REDUNDANCY,
 };
 CAPNP_DECLARE_ENUM(FaultType, cd55c07f69249798);
 CAPNP_DECLARE_SCHEMA(8a58adf93e5b3751);
@@ -381,12 +386,13 @@ enum class AudibleAlert_e9e600c8b9e6b62d: uint16_t {
   DISENGAGE,
   REFUSE,
   WARNING_SOFT,
-  WARNING_IMMEDIATE,
+  WARNING_IMMEDIATE_SYSTEM,
   PROMPT,
   PROMPT_REPEAT,
   PROMPT_DISTRACTED,
   PRE_ALERT,
   COMPLETE,
+  WARNING_IMMEDIATE_USER,
 };
 CAPNP_DECLARE_ENUM(AudibleAlert, e9e600c8b9e6b62d);
 CAPNP_DECLARE_SCHEMA(dbe58b96d2d1ac61);
@@ -11840,8 +11846,6 @@ public:
 
   inline bool getAllowBrake() const;
 
-  inline float getAccelBoost() const;
-
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -11926,9 +11930,6 @@ public:
 
   inline bool getAllowBrake();
   inline void setAllowBrake(bool value);
-
-  inline float getAccelBoost();
-  inline void setAccelBoost(float value);
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -12030,6 +12031,8 @@ public:
   inline bool getCommIssue() const;
 
   inline  ::cereal::LongitudinalPersonality getPersonality() const;
+
+  inline float getAccelBoost() const;
 
 private:
   ::capnp::_::StructReader _reader;
@@ -12152,6 +12155,9 @@ public:
 
   inline  ::cereal::LongitudinalPersonality getPersonality();
   inline void setPersonality( ::cereal::LongitudinalPersonality value);
+
+  inline float getAccelBoost();
+  inline void setAccelBoost(float value);
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -36874,6 +36880,7 @@ inline typename LongitudinalPlan::Deprecated::Builder LongitudinalPlan::Builder:
   _builder.setDataField< ::uint32_t>(::capnp::bounded<16>() * ::capnp::ELEMENTS, 0);
   _builder.setDataField< ::uint32_t>(::capnp::bounded<17>() * ::capnp::ELEMENTS, 0);
   _builder.setDataField< ::uint16_t>(::capnp::bounded<40>() * ::capnp::ELEMENTS, 0);
+  _builder.setDataField< ::uint32_t>(::capnp::bounded<21>() * ::capnp::ELEMENTS, 0);
   _builder.getPointerField(::capnp::bounded<0>() * ::capnp::POINTERS).clear();
   _builder.getPointerField(::capnp::bounded<1>() * ::capnp::POINTERS).clear();
   _builder.getPointerField(::capnp::bounded<2>() * ::capnp::POINTERS).clear();
@@ -37131,20 +37138,6 @@ inline bool LongitudinalPlan::Builder::getAllowBrake() {
 inline void LongitudinalPlan::Builder::setAllowBrake(bool value) {
   _builder.setDataField<bool>(
       ::capnp::bounded<14>() * ::capnp::ELEMENTS, value);
-}
-
-inline float LongitudinalPlan::Reader::getAccelBoost() const {
-  return _reader.getDataField<float>(
-      ::capnp::bounded<21>() * ::capnp::ELEMENTS);
-}
-
-inline float LongitudinalPlan::Builder::getAccelBoost() {
-  return _builder.getDataField<float>(
-      ::capnp::bounded<21>() * ::capnp::ELEMENTS);
-}
-inline void LongitudinalPlan::Builder::setAccelBoost(float value) {
-  _builder.setDataField<float>(
-      ::capnp::bounded<21>() * ::capnp::ELEMENTS, value);
 }
 
 inline bool LongitudinalPlan::Deprecated::Reader::getLateralValid() const {
@@ -37592,6 +37585,20 @@ inline  ::cereal::LongitudinalPersonality LongitudinalPlan::Deprecated::Builder:
 inline void LongitudinalPlan::Deprecated::Builder::setPersonality( ::cereal::LongitudinalPersonality value) {
   _builder.setDataField< ::cereal::LongitudinalPersonality>(
       ::capnp::bounded<40>() * ::capnp::ELEMENTS, value);
+}
+
+inline float LongitudinalPlan::Deprecated::Reader::getAccelBoost() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<21>() * ::capnp::ELEMENTS);
+}
+
+inline float LongitudinalPlan::Deprecated::Builder::getAccelBoost() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<21>() * ::capnp::ELEMENTS);
+}
+inline void LongitudinalPlan::Deprecated::Builder::setAccelBoost(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<21>() * ::capnp::ELEMENTS, value);
 }
 
 inline bool UiPlan::Reader::hasPosition() const {

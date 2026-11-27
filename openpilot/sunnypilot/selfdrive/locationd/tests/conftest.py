@@ -23,7 +23,7 @@ def fake_params(monkeypatch):
   """One FakeParams behind both Params sites, Enforce Torque Control and Self-Tune on, caches
   empty. Speed-dep learning runs wherever self-tune does, and make_cp's brand is not one
   upstream self-tunes, so both toggles are needed."""
-  return _route_params(monkeypatch, FakeParams(EnforceTorqueControl=True, LiveTorqueParamsToggle=True))
+  return _route_params(monkeypatch, FakeParams(EnforceTorqueControl=True, LiveTorqueParamsToggle=True, SuburbanFactorFloorScale=1.0))
 
 
 @pytest.fixture

@@ -52,7 +52,6 @@ from openpilot.sunnypilot.modeld_v2.modeld_base import ModelStateBase
 from openpilot.sunnypilot.modeld_v2.helpers import load_model
 from openpilot.sunnypilot.modeld_v2.frame_fusion import fused_with_warp
 from openpilot.sunnypilot.modeld_v2.model_adapters import get_model_adapter
-from openpilot.sunnypilot.modeld_v2.small_lateral import SmallLateral
 from openpilot.sunnypilot.models.helpers import get_active_bundle
 from openpilot.sunnypilot.selfdrive.controls.lib.relc import RoadEdgeLaneChangeController
 from openpilot.sunnypilot import jetlink_adapter
@@ -247,7 +246,7 @@ class ModelState(ModelStateBase):
       desired_curvature = get_curvature_from_output(model_output, curvature_plan, v_ego, lat_action_t, self.mlsim)
     else:
       desired_accel = model_output['action'][0, 1]
-      desired_curvature = model_output['action'][0, 0] / (max(1.0, v_ego))**2
+      desired_curvature = model_output['action'][0, 0] / (max(2.5, v_ego))**2
     if blendful is not None:
       desired_curvature += blendful(desired_curvature)
 
@@ -305,6 +304,9 @@ def main(demo=False):
   if use_extra_client:
     cloudlog.warning(f"connected extra cam with buffer size: {vipc_client_extra.buffer_len} ({vipc_client_extra.width} x {vipc_client_extra.height})")
 
+  cam_w, cam_h = vipc_client_main.width, vipc_client_main.height
+  assert cam_w is not None and cam_h is not None
+
   cloudlog.warning("loading model")
   st = time.monotonic()
 
@@ -315,7 +317,7 @@ def main(demo=False):
       nonlocal big_model
       try:
         wait_for_chestnut()
-        m = ModelState(cam_w=vipc_client_main.width, cam_h=vipc_client_main.height, chestnut=True)
+        m = ModelState(cam_w=cam_w, cam_h=cam_h, chestnut=True)
         m.warmup()
         big_model = m
       except Exception:
@@ -332,11 +334,11 @@ def main(demo=False):
     else:
       params.put_bool("ChestnutActive", model is not None)
 
-  small_model = ModelState(cam_w=vipc_client_main.width, cam_h=vipc_client_main.height, chestnut=False) if model is None or CHESTNUT else None
+  small_model = ModelState(cam_w=cam_w, cam_h=cam_h, chestnut=False) if model is None or CHESTNUT else None
   if model is None:
     model = small_model
   elif small_model is not None:
-    small_model.warmup()  # it steers beside the chestnut at low speed: its first run is ~1.3 s
+    small_model.warmup()  # the chestnut's fallback: its first run is ~1.3 s
   model = jetlink_adapter.attach(model, small_model, vipc_client_main.width, vipc_client_main.height)
   params.put_bool("ChestnutLoading", False)
   assert model is not None
@@ -384,7 +386,6 @@ def main(demo=False):
   DH = DesireHelper()
   meta_constants = load_meta_constants()
   RELC = RoadEdgeLaneChangeController()
-  small_lateral = SmallLateral(small_model)
 
   while True:
     # Keep receiving frames until we are at least 1 frame ahead of previous extra frame
@@ -426,7 +427,7 @@ def main(demo=False):
     v_ego = max(sm["carState"].vEgo, 0.)
     if settings.refresh(sm, params, model):
       model.PLANPLUS_CONTROL = params.get("PlanplusControl", return_default=True)
-      small_lateral.speed = params.get("SmallModelSteering", return_default=True)
+    big_lat_smooth = settings.big_lat_smooth(model)
     lat_delay = model.lat_delay + model.LAT_SMOOTH_SECONDS
     long_delay = CP.longitudinalActuatorDelay + model.LONG_SMOOTH_SECONDS
     if sm.updated["extrinsicsCalibration"] and sm.seen['narrowRoadCameraState'] and sm.seen['deviceState']:
@@ -479,9 +480,7 @@ def main(demo=False):
     try:
       send_chestnut = (chestnut_state is not None and
                        run_count % round(model.constants.MODEL_FREQ / SERVICE_LIST['chestnutGpuState'].frequency) == 0)
-      model_output = model.run(bufs, transforms, inputs, small_lateral.after_enqueue(
-        model, chestnut_state.send if send_chestnut else None, desire, (buf_main, buf_extra),
-        (model_transform_main, model_transform_extra), inputs, v_ego))
+      model_output = model.run(bufs, transforms, inputs, chestnut_state.send if send_chestnut else None)
     except Exception:
       if not model.chestnut:
         raise
@@ -509,7 +508,7 @@ def main(demo=False):
         prev_action.desiredCurvature = sm['controlsState'].curvature
       action = model.get_action_from_model(model_output, prev_action, lat_action_t, long_action_t, v_ego,
                                            settings.blendful_callback(model_output, v_ego, desire, DH.lane_change_state))
-      small_lateral.curvature(action, prev_action, v_ego)
+      settings.smooth_curvature(action, prev_action, big_lat_smooth)
       prev_action = action
       fill_model_msg(drivingdata_send, modelv2_send, model_output, action,
                      publish_state, meta_main.frame_id, meta_extra.frame_id, frame_id,

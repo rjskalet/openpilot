@@ -10,13 +10,23 @@ planners beside them, and the two SLA publishers in `controls/lib/speed_limit/`
 
 ## Which planner runs
 
-`zoompilot.make_smart_cruise_control(CP)` picks the curve planners once per drive. Brands in
-`zoompilot.TUNED_BRANDS` (`('mazda',)`, the brands whose stock ACC response and planning limits
-have been measured from their logs) run the zoompilot vision and map planners this document
-describes. Every other brand runs sunnypilot's `vision_controller.py`, `map_controller.py` and
+`zoompilot.make_smart_cruise_control(CP)` picks the curve planners once per drive. The zoompilot
+vision and map planners this document describes run on:
+
+- **openpilot long, every brand.** The planner drives the cruise candidate, so nothing about the
+  car's stock ACC is involved: the budget is the planner's and the lead is the car's
+  `longitudinalActuatorDelay`. In the op-long sim (25 recorded curves, actuator delay 0.05 to
+  0.5 s) they lose about 1.1 to 1.3 s per curve against 2.1 for sunnypilot's controller and dip
+  1 to 3 mph under the allowed speed against 6 to 7.
+- **stock ACC, brands in `zoompilot.TUNED_BRANDS`** (`('mazda',)`, the brands whose stock ACC
+  response and planning limits have been measured from their logs).
+
+Every other stock ACC brand runs sunnypilot's `vision_controller.py`, `map_controller.py` and
 `smart_cruise_control.py`, kept byte-identical to sunnypilot master together with their tests,
-so an unmeasured brand is not tuned on Mazda data and a sync never conflicts there. Only the
-zoompilot vision planner publishes `sccVAheadMin`; on every other brand it is 0, which leaves
+so an unmeasured brand is not tuned on Mazda data and a sync never conflicts there. Public fleet
+logs put Honda and Hyundai stock ACC at 0.3 to 0.45 m/s^2 whatever the dash gap, and in the sim
+the planner choice barely matters on such a plant, so there is nothing to gain by moving them.
+Only the zoompilot vision planner publishes `sccVAheadMin`; elsewhere it is 0, which leaves
 ICBM's restore on its stillness heuristic (`icbm.md`). `limits.py`, `speed_profile.py` and
 `publish_ramp` stay shared with the SLA publishers on every brand.
 
@@ -43,11 +53,17 @@ actuation lead are picked once.
 - **openpilot long**: budget 1.2 m/s^2 (`A_CRUISE_MIN`), jerk from `J_CRUISE_VALS`
   over `A_CRUISE_MAX_BP`, lead `longitudinalActuatorDelay`. Mirrored from the upstream
   planner, which cannot be imported (it imports the SP overlay); `test_limits.py` reads
-  the upstream source and pins the mirror.
+  the upstream source and pins the mirror. Under a curve limiter the candidate comes off
+  positive accel at `OP_LONG_RELEASE_JERK_X` (3) times that jerk, and never more than one
+  cruise step past zero: a bend seen, lost and seen again finds the car accelerating, and at
+  1x a slow car needs about 3 s to get back to zero (worst curve felt 3.23 m/s^2, 2.26 at 3x;
+  2x gives 2.56, 5x 2.14). Braking builds at 1x.
 - **stock ACC**: budget is the decel the overshoot lever holds the ECU to (mazda 0.75,
   the budget column of the actuation profile's `decel_overshoot`; unmeasured brands 0.5,
   where being wrong only means braking earlier), response 1.0 s, plus the time to walk the
-  dash down by the tracking gap at the measured servo walk rate (mazda 8 mph at 4 mph/s). The ECU
+  dash down by the tracking gap at the measured servo walk rate (mazda 8 mph at 4 units/s; on a
+  km/h dash the same gap is 1.6 times the presses, `dash_traversal_time(..., is_metric)`, the
+  press rate itself measured on mph dashes only). The ECU
   brakes on the gap as soon as it opens and the lever tracks `vEgo` down from there, so
   the rest of a deep dip is not dead time; leading by the whole dip committed a 30 mph
   drop 5 s early. The native 5 mph hold grid must not size the lead: synthesized holds
@@ -192,6 +208,43 @@ to the budget (`publish_ramp`).
 `_PLAN_MARGIN = 0.95`: plan to 95% of the lateral ceiling so actuation lag lands the
 apex on it instead of over it. Swept against the corpus: at 1.0 the sim leaves 13% of
 fair apexes above 2.2 m/s^2; at 0.95 that drops to 5% for 1.4% of speed given up.
+
+## Road bank
+
+What the car feels is `v^2 * kappa - g * roll` (signed, left positive; `roll` is
+`vehicleParameters.roll`). Against the IMU on the 10-12/13 drives (8.5 h, 9 routes) the fit is
+0.97 and 0.91, and the roll term takes the residual from 0.27 to 0.17 m/s^2. commaai/openpilot
+21f7747d (11-16) uses the same term for its e2e curve offset, with the roll now only.
+
+The ceiling table was tuned on real curves, which carry the bank typical for their speed.
+Median `g * roll`, side-signed, over sustained curves (`|lat| > 1` for 2 s):
+
+| curve speed, mph | 15-20 | 20-25 | 25-30 | 30-35 | 35-40 | 40-45 | 45-80 |
+|---|---|---|---|---|---|---|---|
+| bank carry, m/s^2 | +0.04 | +0.12 | +0.32 | +0.26 | +0.50 | +0.31 | +0.45 to +0.54 |
+
+Above 35 mph it is hardly ever adverse (p10 +0.22 to +0.36). So `bank_shift` moves a point's
+ceiling only by its departure from `_BANK_TYPICAL` (0.05 / 0.3 / 0.48 at 17.5 / 27.5 / 37.5 mph),
+clipped to -1.0 / +0.4 and kept above half the table. A typical curve plans as before, a flat
+or adverse one slows, a steep one is let through. Profiles (`CurveSpeedProfile`) scale the
+table, not the bank: the bank is physics, not taste.
+
+Roll along the path is the roll now plus `modelV2.orientation.x`, the model's predicted change.
+Upstream comments that term out; on these drives it tracks the realised change (roll at
+`t + tau` minus roll at `t`) with slope 1.0 and corr 0.86 at 2-4 s, 0.95-0.97 on changes over
+1.5 deg, and halves the error of holding the roll now (0.35 vs 0.70 deg at 3 s). That is what
+lets a banked curve ahead count before the car is in it.
+
+`vehicleParameters.roll` includes body roll (outward, like adverse camber), so the carry is
+understated in a hard curve; the typical table was measured the same way, so the departure is
+consistent. Without `vehicleParameters.valid` (paramsd converging) every point plans on the
+typical bank, which is the old plan exactly.
+
+Route sim, 10-12/13 roads, stock ACC, bank off -> on (25 road curves; felt = peak over apex
++-30 m at the simulated speed, recorded roll): felt p50 1.46 -> 1.57, sd 0.39 -> 0.34, max
+2.49 -> 2.46, time lost 1.86 -> 1.73 s. Banked interstate curves (carry +0.77 to +0.83) gain
+2-7 mph and stay at or under 1.8 felt; the one flat curve (2c1, carry -0.02) drops 1.9 mph,
+felt 2.39 -> 2.19.
 
 ## Commit, hold, release
 
@@ -405,8 +458,12 @@ for every brand with a measured plant (`icbm.md`).
 
 | name | value | measurement | route |
 |---|---|---|---|
-| `TUNED_BRANDS` | `('mazda',)` | brands with a measured stock ACC response | n/a |
+| `TUNED_BRANDS` | `('mazda',)` | brands with a measured stock ACC response; openpilot long runs the planners on every brand | n/a |
+| `OP_LONG_RELEASE_JERK_X` | 3 | cruise-jerk multiple for releasing positive accel under a curve limiter | op-long sim, 25 curves |
 | `_A_LAT_CURVE_BP` / `_A_LAT_CURVE` | 15.6 / 24.6 / 31.3 m/s curve speed -> 2.2 / 2.1 / 2.2 m/s^2 | lateral ceiling (v^2 * curvature) at the curve's own speed (`curve_speed`, the table re-keyed on curvature). Driver-limited curves (129, corpus) p75 2.3 below 45 mph, 2.0 at 45-55; logged interstate curves are banked 2.5-4 deg (0.4-0.65 m/s^2 not felt). History: 2.0 flat until 09-30; 1.8 after route 260; set-keyed 2.0 -> 1.8 (40 -> 60 mph set) from 10-04 until 10-13, when 55+ was too slow and back roads a tad slow | 10-13 route sim, user reports |
+| `_BANK_TYPICAL_BP` / `_BANK_TYPICAL` | 7.8 / 12.3 / 16.8 m/s curve speed -> 0.05 / 0.3 / 0.48 m/s^2 | median side-signed `g * roll` over sustained curves; the bank the ceiling table already assumes | 10-12/13, 8.5 h |
+| `_BANK_SHIFT_MIN` / `_BANK_SHIFT_MAX` | -1.0 / +0.4 m/s^2 | clip on the departure from typical; corpus p90 departure +0.2 above 35 mph, +0.4 below | 10-12/13 |
+| `_BANK_FLOOR` | 0.5 | a shifted ceiling keeps half the table's | n/a |
 | `_KAPPA_DEPTH_SET_BP` | 20.1 to 24.6 m/s set speed | the range gain stops setting the dash target from a 55 mph set (timing keeps it) | route 2c0, 10-13 route sim |
 | `_IN_CURVE_MARGIN` | 1.0 m/s | the plan holds while the near field limits the car below `vEgo` plus this | user reports |
 | `_PLAN_MARGIN` | 0.95 | 13% -> 5% of fair apexes above 2.2 for 1.4% speed | corpus sim |
@@ -433,7 +490,7 @@ for every brand with a measured plant (`icbm.md`).
 
 - The lateral-acceleration-percentile heuristic. Used the model's velocity plan, so a
   planned slowdown lowered the prediction below the abort threshold mid-braking. It is
-  still what the brands outside `TUNED_BRANDS` run.
+  still what stock ACC brands outside `TUNED_BRANDS` run.
 - Geometric curvature from `position.x/y`. Same range bias, worse near the car.
 - An uncapped bias gain (up to 2.07). Wide per-apex spread past 80 m; the replay bought
   no more apexes and added straight-road limiter activity.

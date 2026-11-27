@@ -1,0 +1,131 @@
+name: PR31 ARM64 Params registry and cache smoke test
+
+on:
+  push:
+    branches:
+      - integration/zoompilot-stable-20261121-dual-vehicle
+
+permissions:
+  contents: read
+
+jobs:
+  arm64-params-registry:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify ARM64 compiled parameter registry against source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import ctypes
+          import pathlib
+          import re
+          import struct
+          import tempfile
+
+          header = pathlib.Path("openpilot/common/params_keys.h").read_text()
+          path = pathlib.Path("openpilot/common/libparams_c.so")
+          pairs = re.findall(r'^\s*\{"([^"]+)",\s*\{', header, flags=re.M)
+          source = set(pairs)
+          assert len(pairs) == len(source), "duplicate registered parameter keys"
+          assert len(source) > 250, f"source registry unexpectedly small: {len(source)}"
+
+          raw = path.read_bytes()
+          assert raw.startswith(b'\x7fELF'), "compiled libparams_c.so is not an ELF library"
+          assert struct.unpack("<H", raw[18:20])[0] == 183, "compiled Params library is not ARM64"
+          class Buffer(ctypes.Structure):
+            _fields_ = [("data", ctypes.c_void_p), ("size", ctypes.c_size_t)]
+          lib = ctypes.CDLL(str(path.resolve()))
+          lib.params_create.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
+          lib.params_create.restype = ctypes.c_void_p
+          lib.params_destroy.argtypes = [ctypes.c_void_p]
+          lib.params_destroy.restype = None
+          lib.params_keys_size.argtypes = [ctypes.c_void_p]
+          lib.params_keys_size.restype = ctypes.c_size_t
+          lib.params_key_at.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+          lib.params_key_at.restype = Buffer
+          lib.params_check_key.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+          lib.params_check_key.restype = ctypes.c_bool
+          lib.params_get_key_type.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+          lib.params_get_key_type.restype = ctypes.c_int
+          lib.params_get_default.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+          lib.params_get_default.restype = Buffer
+          lib.params_put.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_size_t, ctypes.c_bool]
+          lib.params_put.restype = ctypes.c_int
+          lib.params_get.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_bool]
+          lib.params_get.restype = Buffer
+          lib.params_last_error.argtypes = []
+          lib.params_last_error.restype = ctypes.c_char_p
+
+          def val(b):
+            return ctypes.string_at(b.data, b.size) if b.data else None
+          with tempfile.TemporaryDirectory() as d:
+            encoded = d.encode()
+            handle = lib.params_create(encoded, len(encoded))
+            assert handle, f"Params constructor failed: {lib.params_last_error()!r}"
+            try:
+              n = lib.params_keys_size(handle)
+              compiled = set()
+              for i in range(n):
+                entry = val(lib.params_key_at(handle, i))
+                assert entry is not None, ("null compiled key", i)
+                compiled.add(entry.decode())
+              missing, unexpected = source - compiled, compiled - source
+              print(f"PARAMS_SOURCE_KEYS={len(source)}")
+              print(f"PARAMS_COMPILED_KEYS={n}")
+              print(f"PARAMS_MISSING_FROM_BINARY={sorted(missing)}")
+              print(f"PARAMS_BINARY_ONLY_KEYS={sorted(unexpected)}")
+              assert n == len(compiled), "duplicate compiled keys"
+              assert not missing and not unexpected, "Params source and ARM64 library registry differ"
+
+              expected_types = {
+                "LiveTorqueParametersMazda": 6,
+                "LiveTorqueCarParamsMazda": 6,
+                "LiveTorqueParametersSPMazda": 6,
+                "LiveTorqueParametersSuburban": 6,
+                "LiveTorqueCarParamsSuburban": 6,
+                "LiveTorqueParametersSPSuburban": 6,
+                "LiveTorqueParameters": 6,
+                "LiveTorqueParametersSP": 6,
+                "CarParamsPrevRoute": 6,
+                "SuburbanFactorFloorScale": 3,
+              }
+              for key, typ in expected_types.items():
+                k = key.encode()
+                assert lib.params_check_key(handle,k), f"missing compiled key: {key}"
+                actual = lib.params_get_key_type(handle,k)
+                assert actual == typ, f"wrong type for {key}: {actual} != {typ}"
+                assert key in source, f"source lacks {key}"
+              assert val(lib.params_get_default(handle,b"SuburbanFactorFloorScale")) == b"1.0"
+              print("PARAMS_REQUIRED_KEYS_TYPES_DEFAULTS=PASS")
+              for key in ["LiveTorqueParametersMazda","LiveTorqueCarParamsMazda","LiveTorqueParametersSPMazda",
+                          "LiveTorqueParametersSuburban","LiveTorqueCarParamsSuburban","LiveTorqueParametersSPSuburban"]:
+                k = key.encode()
+                sample = b"\x00\x10\x00\xfe-pr31-smoke-" + k
+                status = lib.params_put(handle,k,sample,len(sample),True)
+                assert status == 0, f"put({key})={status}, last_error={lib.params_last_error()!r}"
+                actual = val(lib.params_get(handle,k,False))
+                assert actual == sample, f"roundtrip failed for {key}"
+              print("PARAMS_MAZDA_SUBURBAN_CACHE_ROUNDTRIP=PASS")
+            finally:
+              lib.params_destroy(handle)
+          PY
+
+      - name: Install Mazda and Suburban cache regression dependencies
+        shell: bash
+        run: |
+          python3 -m venv /tmp/pr31-cache-venv
+          /tmp/pr31-cache-venv/bin/pip install --disable-pip-version-check --only-binary=:all: pytest numpy pycapnp pycryptodome tqdm cffi zstandard pyzmq setproctitle requests
+
+      - name: Test independent Mazda and Suburban cache routing and restoration
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONPATH="$PWD:$PWD/opendbc_repo:$PWD/msgq_repo"
+          /tmp/pr31-cache-venv/bin/python -m pytest -q \
+            openpilot/sunnypilot/selfdrive/locationd/tests/test_vehicle_torque_cache_routing.py \
+            openpilot/sunnypilot/selfdrive/locationd/tests/test_suburban_speed_bin_learning.py \
+            openpilot/sunnypilot/selfdrive/locationd/tests/test_torqued_cache_restore.py \
+            openpilot/sunnypilot/selfdrive/locationd/tests/test_torqued_speed_dep.py

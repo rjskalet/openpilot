@@ -4,23 +4,23 @@ Copyright (c) 2026-, Zeph Leggett.
 This file is part of zoompilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
-import math
 
 import numpy as np
 import pytest
 
 import openpilot.cereal.messaging as messaging
+from openpilot.cereal import log
 from openpilot.common.realtime import DT_MDL as DT
 from openpilot.sunnypilot.selfdrive.car.tests.fakes import FakeParams
+from openpilot.sunnypilot.selfdrive.controls.lib.e2e_set_speed import approach
 from openpilot.sunnypilot.selfdrive.controls.lib.e2e_set_speed import controller as c
 from openpilot.sunnypilot.selfdrive.controls.lib.e2e_set_speed.controller import E2ESetSpeedController, Inhibit
-from openpilot.sunnypilot.selfdrive.controls.lib.e2e_set_speed.tests.helpers import ENGAGED, T_IDXS, build_sm
-from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.limits import op_long_cruise_jerk
+from openpilot.sunnypilot.selfdrive.controls.lib.e2e_set_speed.tests.helpers import ENGAGED, T_IDXS, build_sm, plan_ramp
 
 V_EGO = 20.
+STANDARD = log.LongitudinalPersonality.standard
 A_CRUISE = 0.5  # the planner's cruise candidate
-RISE = op_long_cruise_jerk(V_EGO)
-SETTLE_FRAMES = round(2. / (op_long_cruise_jerk(40.) * DT)) + 10
+SETTLE_FRAMES = round(2. / (c.RISE_JERK * DT)) + 10  # a 2 m/s^2 gap
 
 
 def run(ctl, n, sm, a_model=0., a_cruise=A_CRUISE, **kwargs):
@@ -64,13 +64,41 @@ def test_idle_resets_at_once(kwargs):
   assert (ctl.inhibit, ctl.lift) == (Inhibit.inactive, 0.)
 
 
-def test_lifts_from_the_first_frame_at_the_rate_limit():
+CRUISE_JERK = 1.  # m/s^3, about upstream's at V_EGO
+
+
+@pytest.mark.parametrize("floor", [
+  lambda t: 1.5,                         # steady
+  lambda t: min(CRUISE_JERK * t, 0.8),   # as on engaging: the planner seeds its cruise candidate at the
+])                                       # car's acceleration, so the floor starts closed and opens fast
+def test_lifted_candidate_rises_on_the_jerk(floor):
+  # from the model's on the first frame, at RISE_JERK whatever the floor does, up to the floor
   ctl = new_controller()
-  lifts = [run(ctl, 1, build_sm(V_EGO), a_cruise=1.5) for _ in range(SETTLE_FRAMES)]
-  assert lifts[0] == pytest.approx(RISE * DT)
-  assert max(np.diff([0.] + lifts)) <= RISE * DT + 1e-9
-  assert lifts[-1] == pytest.approx(1.5)
+  sm = build_sm(V_EGO)
+  out = [run(ctl, 1, sm, a_cruise=floor(i * DT)) for i in range(SETTLE_FRAMES)]
+  assert out[0] == 0.
+  assert max(np.diff(out)) <= c.RISE_JERK * DT + 1e-9
+  second = round(1. / DT)
+  assert out[second] == pytest.approx(c.RISE_JERK * second * DT, abs=2 * c.RISE_JERK * DT)
+  assert out[-1] == pytest.approx(floor(SETTLE_FRAMES * DT))
   assert ctl.inhibit == Inhibit.none
+
+
+def test_lift_takes_up_the_models_wander():
+  # the model eases off inside the gain's band: the lift fills in at once and the candidate holds
+  ctl = settled()
+  assert run(ctl, 1, build_sm(V_EGO), a_model=c.GAIN_BP[1]) == pytest.approx(A_CRUISE)
+  assert ctl.lift == pytest.approx(A_CRUISE - c.GAIN_BP[1])
+
+
+def test_models_own_acceleration_is_never_held_back():
+  # the model pulling harder than RISE_JERK: the candidate is the model's, the lift gives way to it
+  ctl = new_controller()
+  lifts = []
+  for a_model in np.arange(0., 1.5, CRUISE_JERK * DT):
+    assert run(ctl, 1, build_sm(V_EGO), a_model=a_model, a_cruise=1.5) >= a_model
+    lifts.append(ctl.lift)
+  assert max(lifts) <= c.RISE_JERK * DT + 1e-9
 
 
 def test_floor_is_the_cruise_candidate():
@@ -107,14 +135,6 @@ def test_gain_fades_the_lift_as_the_model_slows():
   assert ctl.lift == 0.
 
 
-def test_throttle_probability_scales_the_lift():
-  ctl = new_controller()
-  run(ctl, SETTLE_FRAMES, build_sm(V_EGO, throttle_prob=0.5))
-  assert ctl.lift == pytest.approx(0.5 * A_CRUISE)
-  run(ctl, SETTLE_FRAMES, build_sm(V_EGO, throttle_prob=0.))
-  assert ctl.lift == 0.
-
-
 def test_never_lowers_the_model():
   # over the set speed, braking or a bend ahead: the e2e candidate is the model's or above
   for sm, a_model, a_cruise in [(build_sm(V_EGO), 0.2, -0.5), (build_sm(V_EGO), -1.5, A_CRUISE),
@@ -125,23 +145,73 @@ def test_never_lowers_the_model():
     assert ctl.lift == 0.
 
 
-def test_lets_go_of_the_models_braking_fast():
+def test_lets_go_of_the_models_braking_at_once():
   ctl = settled(a_cruise=1.5)
-  run(ctl, 1, build_sm(V_EGO), a_model=-0.5, a_cruise=1.5)
-  assert ctl.lift == pytest.approx(1.5 - c.LIFT_FALL * DT)
-  run(ctl, math.ceil(1.5 / (c.LIFT_FALL * DT)), build_sm(V_EGO), a_model=-0.5, a_cruise=1.5)
+  # halfway into the fade, the lift drops to its new value in one frame instead of easing off
+  a_model = sum(c.GAIN_BP) / 2
+  run(ctl, 1, build_sm(V_EGO), a_model=a_model, a_cruise=1.5)
+  assert ctl.lift == pytest.approx(0.5 * (ctl.floor - a_model))
+  ctl = settled(a_cruise=1.5)
+  assert run(ctl, 1, build_sm(V_EGO), a_model=-0.5, a_cruise=1.5) == -0.5
   assert ctl.lift == 0.
 
 
-def test_far_plan_speeds_do_not_move_the_lift():
-  # the flicker that pumped the old envelope: the plan's far end dropping 10 mph and back
+def test_far_plan_flicker_does_not_move_the_lift():
+  # the plan's far end flickering on a straight road, up to the drop band
   ctl = settled()
   lifts = []
   for i in range(100):
-    dip = 4.5 if (i // 5) % 2 else 0.
-    plan_v = V_EGO - dip * np.minimum(T_IDXS, 10.) / 10.
-    lifts.append(run(ctl, 1, build_sm(V_EGO, plan_v=plan_v)))
+    dip = 0.99 * -c.GAIN_BP[1] * c.HORIZON if (i // 5) % 2 else 0.
+    lifts.append(run(ctl, 1, build_sm(V_EGO, plan_v=plan_ramp(V_EGO, dip))))
   assert np.ptp(lifts) == 0.
+  assert ctl.plan_fade == 1.
+
+
+@pytest.mark.parametrize("drop, plan_fade", [(0., 1.), (1., 1.), (2., 0.5), (3., 0.), (8., 0.)])
+def test_plan_drop_fades_the_lift(drop, plan_fade):
+  # a gentle coast (inside the gain's band) toward a stop or a light: the lift lets it coast
+  ctl = new_controller()
+  a_model = -0.05
+  run(ctl, SETTLE_FRAMES, build_sm(V_EGO, plan_v=plan_ramp(V_EGO, drop)), a_model=a_model)
+  assert ctl.plan_fade == pytest.approx(plan_fade)
+  assert ctl.gain == pytest.approx(plan_fade)
+  assert ctl.lift == pytest.approx(plan_fade * (A_CRUISE - a_model))
+
+
+def test_coast_toward_a_stop_lets_go_of_the_lift():
+  # lifted on an open road, then the plan starts ending at a stop: the lift goes, never below the model
+  ctl = settled()
+  drops = np.linspace(0., 6., 60)
+  out = [run(ctl, 1, build_sm(V_EGO, plan_v=plan_ramp(V_EGO, d)), a_model=-0.05) for d in drops]
+  assert min(out) >= -0.05
+  assert all(o == -0.05 for o, d in zip(out, drops, strict=True) if d >= c.HORIZON * -c.GAIN_BP[0])
+  assert ctl.lift == 0.
+
+
+@pytest.mark.parametrize("lead, plan_fade", [
+  ((60., 0.), 1.),     # steady lead
+  ((60., -0.9), 1.),   # barely closing
+  ((30., -3.), 0.),    # closing hard, 10 s to contact
+  ((60., -3.), 0.75),  # closing hard, 20 s to contact
+  ((150., -3.), 1.),   # 50 s to contact
+  ((20., -2.), 0.5),   # closing gently, 10 s to contact
+  ((60., 2.), 1.),     # pulling away
+])
+def test_closing_lead_fades_the_lift(lead, plan_fade):
+  ctl = new_controller()
+  run(ctl, SETTLE_FRAMES, build_sm(V_EGO, lead=lead))
+  assert ctl.plan_fade == pytest.approx(plan_fade)
+  assert ctl.lift == pytest.approx(plan_fade * A_CRUISE)
+
+
+def test_closing_lead_fade_is_smooth():
+  ctl = new_controller()
+  fades = []
+  for d in np.linspace(120., 20., 101):  # closing at 3 m/s from 40 s to 7 s out
+    run(ctl, 1, build_sm(V_EGO, lead=(d, -3.)))
+    fades.append(ctl.plan_fade)
+  assert fades[0] == 1. and fades[-1] == 0.
+  assert max(np.abs(np.diff(fades))) <= 0.05 + 1e-9  # 1 m of 100 per step
 
 
 @pytest.mark.parametrize("lat, fade", [(0.4, 1.), (0.8, 0.5), (1.2, 0.)])
@@ -150,6 +220,26 @@ def test_a_bend_ahead_fades_the_lift(lat, fade):
   run(ctl, SETTLE_FRAMES, build_sm(V_EGO, yaw_rate=bend_ahead(lat)))
   assert ctl.fade == pytest.approx(fade)
   assert ctl.lift == pytest.approx(fade * A_CRUISE)
+
+
+@pytest.mark.parametrize("a_cruise", [0.5, 1.5])
+def test_bend_flicker_moves_the_lift_on_the_jerk_budget(a_cruise):
+  # the path's bend over 10 s flickering frame to frame across the fade's band: the lift follows on
+  # the fade's budget, not at the frame rate
+  ctl = settled(a_cruise=a_cruise)
+  lifts = [ctl.lift]
+  for i in range(200):
+    lat = 0.9 if i % 2 else 0.7
+    lifts.append(run(ctl, 1, build_sm(V_EGO, yaw_rate=bend_ahead(lat)), a_cruise=a_cruise))
+  assert max(np.abs(np.diff(lifts))) <= c.FADE_JERK * DT + 1e-9
+  assert 0.25 * a_cruise - 1e-9 <= ctl.lift <= 0.75 * a_cruise + 1e-9  # inside the flicker's fades, 0.25-0.75
+
+
+def test_bend_ahead_eases_the_lift_off_on_the_jerk_budget():
+  ctl = settled(a_cruise=1.5)
+  lifts = [run(ctl, 1, build_sm(V_EGO, yaw_rate=bend_ahead(1.2)), a_cruise=1.5) for _ in range(SETTLE_FRAMES)]
+  assert lifts[0] == pytest.approx(1.5 - c.FADE_JERK * DT)
+  assert lifts[-1] == 0.
 
 
 def test_lane_change_drops_the_lift():
@@ -172,15 +262,61 @@ def test_invalid_model_passes_through():
   assert run(ctl, 1, sm, a_model=0.05) == 0.05
   assert ctl.inhibit == Inhibit.invalid
 
-  assert run(ctl, 1, build_sm(V_EGO, throttle_prob=float('nan')), a_model=0.05) == 0.05
+  assert run(ctl, 1, build_sm(float('nan')), a_model=0.05) == 0.05
   assert ctl.inhibit == Inhibit.invalid
 
 
+FAR = 80.  # m/s under the target: the root is past every ceiling
+
+
 def test_approach_closes_small_gaps_gently():
-  # the floor's pace grows with the shortfall to the whole speed envelope at 10 m/s, and is a third
-  # of it at the target
-  assert all(np.diff(c.APPROACH_GAP_FRACTION) > 0) and c.APPROACH_GAP_FRACTION[-1] == 1.
-  for v, ceiling in zip(c.APPROACH_BP, c.APPROACH_V, strict=True):
-    assert c.approach_accel(v, v + 10.) == pytest.approx(ceiling)
-    assert c.approach_accel(v, v) == pytest.approx(c.APPROACH_GAP_FRACTION[0] * ceiling)
-  assert c.approach_accel(V_EGO, V_EGO + 1.) < 0.42  # a CX-5 5>4 kickdown at highway speed
+  # the floor's pace, up to the speed's ceiling
+  for v, ceiling in zip(approach.APPROACH_BP, approach.APPROACH_V, strict=True):
+    assert approach.approach_accel(v, v + FAR, STANDARD) == pytest.approx(ceiling)
+  assert approach.approach_accel(V_EGO, V_EGO + 1., STANDARD) < 0.42  # a CX-5 5>4 kickdown at highway speed
+
+
+@pytest.mark.parametrize("v", [5., 15., 25.])
+def test_approach_is_continuous_at_the_target(v):
+  # no step where the car reaches the target: the pace falls smoothly through 0
+  step = 1e-3
+  gaps = np.linspace(-1., 10., 11001)
+  paces = np.array([approach.approach_accel(v - g, v, STANDARD) for g in gaps])
+  assert all(np.diff(paces) >= 0.)
+  assert max(np.diff(paces)) <= np.sqrt(2 * approach.APPROACH_JERK_V[0] * step) + 1e-9  # the root's steepest step, off the target
+  assert approach.approach_accel(v, v, STANDARD) == 0.
+
+
+@pytest.mark.parametrize("gap", [0.01, 0.05])
+def test_approach_settles_on_the_gap_near_the_target(gap):
+  # inside 2 * jerk the pace is the gap at 1 /s, under the root, so the floor eases in by itself
+  for v in approach.APPROACH_BP:
+    assert approach.approach_accel(v - gap, v, STANDARD) == pytest.approx(gap)
+  assert approach.approach_accel(V_EGO - 0.2, V_EGO, STANDARD) == pytest.approx(np.sqrt(2 * approach.APPROACH_JERK_V[-1] * 0.2))
+
+
+def test_approach_is_brisker_in_town():
+  # the same shortfall asks more pulling away from a stop than at highway speed, under both ceilings
+  town, highway = (approach.approach_accel(v, v + 5., STANDARD) for v in (8., 20.))
+  assert highway < 0.6 < town < approach.approach_ceiling(8., STANDARD)
+
+
+@pytest.mark.parametrize("over", [0., 0.5, 5.])
+def test_approach_pulls_back_over_the_target(over):
+  # over the target the pace is the gap, pulling back toward it however the cruise candidate lags
+  for personality in (log.LongitudinalPersonality.relaxed, STANDARD, log.LongitudinalPersonality.aggressive):
+    for v in approach.APPROACH_BP:
+      assert approach.approach_accel(v + over, v, personality) == pytest.approx(-over)
+
+
+def test_approach_follows_the_personality():
+  # Standard is the ceiling; Relaxed and Aggressive sit a 0.15 step either side of it at a full
+  # shortfall. Read from a message as the planner does.
+  def personality(name):
+    msg = messaging.new_message('selfdriveState')
+    msg.selfdriveState.personality = name
+    return msg.as_reader().selfdriveState.personality.raw
+  relaxed_p, standard_p, aggressive_p = (personality(n) for n in ('relaxed', 'standard', 'aggressive'))
+  for v in approach.APPROACH_BP:
+    relaxed, standard, aggressive = (approach.approach_accel(v, v + FAR, p) for p in (relaxed_p, standard_p, aggressive_p))
+    assert relaxed == pytest.approx(standard - 0.15) and aggressive == pytest.approx(standard + 0.15)

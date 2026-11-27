@@ -70,15 +70,15 @@ class TestUIStateJetlinkView(UITest):
   @staticmethod
   def _with(sm, started=False):
     from openpilot.selfdrive.ui.ui_state import ui_state
-    saved = ui_state.sm, ui_state.started, ui_state.started_frame, ui_state.jetlink, ui_state.chestnut_present
-    ui_state.sm, ui_state.started, ui_state.started_frame = sm, started, 0
+    saved = ui_state.sm, ui_state.started, ui_state._started_frame, ui_state.jetlink, ui_state.chestnut_present
+    ui_state.sm, ui_state.started, ui_state._started_frame = sm, started, 0
     ui_state.chestnut_present = sm.board
     return saved
 
   @staticmethod
   def _restore(saved):
     from openpilot.selfdrive.ui.ui_state import ui_state
-    ui_state.sm, ui_state.started, ui_state.started_frame, ui_state.jetlink, ui_state.chestnut_present = saved
+    ui_state.sm, ui_state.started, ui_state._started_frame, ui_state.jetlink, ui_state.chestnut_present = saved
 
   def test_a_fitted_chestnut_never_asks_jetlink(self):
     """A board present is upstream's path byte for byte: no view, and nothing in the
@@ -157,6 +157,19 @@ class TestUIStateJetlinkView(UITest):
       ui_state.chestnut_compiled = compiled
       self._restore(saved)
 
+  def test_a_cable_is_a_chestnut_only_with_the_link_off(self):
+    """Upstream's onroad guess, a compiled model and a cable, is a Jetson or a phone
+    while the link is on."""
+    from openpilot.selfdrive.ui.ui_state import ui_state
+    saved = ui_state.usb_connected
+    try:
+      for usb, link, expected in ((True, False, True), (True, True, False), (False, False, False)):
+        ui_state.usb_connected = usb
+        with mock.patch("openpilot.sunnypilot.jetlink_adapter.link_on", return_value=link):
+          assert ui_state.cable_may_be_chestnut() == expected
+    finally:
+      ui_state.usb_connected = saved
+
   def test_a_jetlink_view_means_no_chestnut_is_fitted(self):
     """Going onroad, upstream counts any cable plus a compiled model as a late chestnut, and a
     tinygrad small pick reads compiled: the Jetson's cable sent the model names down the chestnut's
@@ -176,14 +189,14 @@ class TestUIStateJetlinkView(UITest):
   def _state(view, state='none', sm=None, started=False):
     """chestnut_state for jetlink's snapshot `view` and modeld's acceleratorState by name."""
     from openpilot.selfdrive.ui.ui_state import ui_state
-    saved = ui_state.sm, ui_state.started, ui_state.started_frame, ui_state.jetlink, ui_state._accelerator_state_name
-    ui_state.sm, ui_state.started, ui_state.started_frame = sm or FakeSM(), started, 0
+    saved = ui_state.sm, ui_state.started, ui_state._started_frame, ui_state.jetlink, ui_state._accelerator_state_name
+    ui_state.sm, ui_state.started, ui_state._started_frame = sm or FakeSM(), started, 0
     ui_state.jetlink, ui_state._accelerator_state_name = view, state
     try:
       ui_state._update_chestnut_state()
       return ui_state.chestnut_state
     finally:
-      ui_state.sm, ui_state.started, ui_state.started_frame, ui_state.jetlink, ui_state._accelerator_state_name = saved
+      ui_state.sm, ui_state.started, ui_state._started_frame, ui_state.jetlink, ui_state._accelerator_state_name = saved
 
   @staticmethod
   def _view(present=True, ready=False, progress=None):
@@ -370,7 +383,7 @@ class TestTiciModelsPanel(UITest):
       for index, mode in enumerate(("off", "usb", "ios")):
         self.params.put("JetlinkLink", index, block=True)
         layout._refresh_accelerator_items()
-        assert action.get_selected_button() == index
+        assert action.selected_button == index
         assert link_mode() == mode
 
   def test_the_modes_are_inert_onroad(self):
@@ -438,8 +451,22 @@ class TestTiciModelsPanel(UITest):
     finally:
       ui_state.chestnut_present = saved
 
+  def test_the_link_toggle_stays_while_the_link_is_on(self):
+    # a chestnut guessed from a cable must not hide the toggle that turns the link off
+    from openpilot.selfdrive.ui.sunnypilot.accelerator_link import link_toggle_meaningful
+    from openpilot.sunnypilot.jetlink_adapter import KEYS
+    ui_state = ui_state_module().ui_state
+    saved = ui_state.chestnut_present
+    try:
+      ui_state.params.put(KEYS.link, 1, block=True)
+      ui_state.chestnut_present = True
+      assert link_toggle_meaningful()
+    finally:
+      ui_state.params.put(KEYS.link, 0, block=True)
+      ui_state.chestnut_present = saved
+
   def test_panel_renders(self):
-    import pyray as rl
+    import raylib_nb as rl
     with jetlink(present=True, model='Cinque Terre'):
       layout = self._layout()
       layout.render(rl.Rectangle(0, 0, 800, 600))
@@ -447,7 +474,7 @@ class TestTiciModelsPanel(UITest):
   def test_an_empty_big_slot_names_whose_default_runs(self):
     # a chestnut runs the model in the tree; without one the slot is the
     # accelerator's, and so is its default
-    import pyray as rl
+    import raylib_nb as rl
     from openpilot.sunnypilot.models.model_name import DEFAULT_BIG_MODEL
     ui_state = ui_state_module().ui_state
     saved = ui_state.chestnut_present
@@ -465,7 +492,7 @@ class TestTiciModelsPanel(UITest):
   def test_refresh_spins_beside_the_link_until_both_catalogs_are_stamped(self):
     # sunnypilot's refresh, as upstream: the model manager restamps each catalog it
     # refetches, the big-model one extended for the accelerator or not
-    import pyray as rl
+    import raylib_nb as rl
     from openpilot.selfdrive.ui.sunnypilot.model_info import MODEL_SYNC_KEYS
     for key in MODEL_SYNC_KEYS:
       self.params.put(key, 1, block=True)
@@ -494,14 +521,14 @@ class TestTiciModelsPanel(UITest):
     stamped = tuple(ModelCache(self.params, suffix=suffix)._LAST_SYNC_KEY for _, suffix in ModelFetcher.MODEL_SOURCES.values())
     assert MODEL_SYNC_KEYS == stamped
 
-  def test_jetlink_and_small_model_steering_sit_before_refresh(self):
+  def test_jetlink_and_big_model_smoothing_sit_before_refresh(self):
     layout = self._layout()
-    assert layout.items[-4:] == [layout.accelerator_link_item, layout.small_steering_control, layout.refresh_item, layout.clear_cache_item]
+    assert layout.items[-4:] == [layout.accelerator_link_item, layout.big_smoothing_toggle, layout.refresh_item, layout.clear_cache_item]
 
   @staticmethod
   def _press(item, button: str):
     """A tap on the item's - or + button, laid out as the panel draws it."""
-    import pyray as rl
+    import raylib_nb as rl
     item.set_parent_rect(rl.Rectangle(0, 0, 1700, 2000))
     item.render(rl.Rectangle(0, 0, 1700, item.get_item_height(item._font, 1700)))
     action = item.action_item
@@ -534,19 +561,6 @@ class TestTiciModelsPanel(UITest):
     layout._update_state()
     assert lane_turn.action_item.get_displayed_value() == "5 mph"
 
-  def test_small_model_steering_reads_ms_in_either_unit(self):
-    saved = self.ui_state.is_metric, self.ui_state.active_runner_tinygrad
-    self.addCleanup(lambda: setattr(self.ui_state, 'is_metric', saved[0]) or setattr(self.ui_state, 'active_runner_tinygrad', saved[1]))
-    for speed, metric, label, step in ((5.0, False, "11 mph", 45), (5.0, True, "18 km/h", 28), (0.0, False, "Off", 45)):
-      self.params.put("SmallModelSteering", speed, block=True)
-      self.ui_state.is_metric = metric
-      layout = self._layout()
-      layout._update_state()
-      control = layout.small_steering_control.action_item
-      assert (control.get_displayed_value(), control.value_change_step) == (label, step)
-    for runner_tinygrad in (False, True):
-      self.ui_state.active_runner_tinygrad = runner_tinygrad
-      assert control.enabled is runner_tinygrad
 
 
 def ui_state_module():

@@ -182,17 +182,19 @@ sections:
     - key: SpeedLimitPolicy
       widget: multiple_button
       title: Speed Limit Source
+      description: Auto follows the limit your car shows, and the map where it shows none. The map also slows you before
+        a lower limit ahead.
+      visibility:
+      - type: capability
+        field: has_speed_limit
+        equals: true
       options:
-      - value: 0
-        label: Car State Only
-      - value: 1
-        label: Map Data Only
       - value: 2
-        label: Car State Priority
-      - value: 3
-        label: Map Data Priority
-      - value: 4
-        label: Combined
+        label: Auto
+      - value: 0
+        label: Car Only
+      - value: 1
+        label: Map Only
     - key: SpeedLimitOffsetType
       widget: multiple_button
       title: Speed Limit Offset Type
@@ -276,3 +278,41 @@ sections:
         field: has_icbm
         equals: true
     - $ref: '#/macros/icbm_scc_not_engaged'
+  - key: CurveSpeedProfile
+    widget: multiple_button
+    title: Curve Speed
+    description: How fast Slow for Curves takes turns. Gentle slows more, Sporty slows less.
+    # values are the index into curve_speed_profile.SCALES
+    options:
+    - value: 0
+      label: Gentle
+    - value: 1
+      label: Normal
+    - value: 2
+      label: Sporty
+    visibility:
+    - type: any
+      conditions:
+      - type: capability
+        field: has_longitudinal_control
+        equals: true
+      - type: capability
+        field: has_icbm
+        equals: true
+    enablement:
+    - type: any
+      conditions:
+      - type: capability
+        field: has_longitudinal_control
+        equals: true
+      - type: capability
+        field: has_icbm
+        equals: true
+    - type: any
+      conditions:
+      - type: param
+        key: SmartCruiseControlVision
+        equals: true
+      - type: param
+        key: SmartCruiseControlMap
+        equals: true

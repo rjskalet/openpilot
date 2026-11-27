@@ -81,7 +81,7 @@ struct SelfdriveStateSP @0x81c2f05a394cf4af {
     refuse @3;
 
     warningSoft @4;
-    warningImmediate @5;
+    warningImmediateSystem @5;
 
     prompt @6;
     promptRepeat @7;
@@ -90,7 +90,7 @@ struct SelfdriveStateSP @0x81c2f05a394cf4af {
     # unused, these are reserved for upstream events so we don't collide
     reserved9 @9;
     reserved10 @10;
-    reserved11 @11;
+    warningImmediateUser @11;
     reserved12 @12;
     reserved13 @13;
     reserved14 @14;
@@ -738,9 +738,9 @@ struct LongitudinalPlanZP @0xc3b0556e1118c2db {
       disabled @0;      # the LeadForecast toggle is off (and logs from before it)
       none @1;
       noLead @2;
-      radar @3;         # a radar track: measured, keeps upstream's extrapolation
+      radar @3;         # a radar track with LeadForecastRadar off: keeps upstream's extrapolation
       invalid @4;
-      mismatch @5;      # radarState's lead is not the model's lead
+      mismatch @5;      # radarState's lead is not the model's lead (radar: off the track's range or speed)
     }
   }
 
@@ -755,6 +755,7 @@ struct LongitudinalPlanZP @0xc3b0556e1118c2db {
     bound @5 :Float32;         # retired 2026-10-27; m/s^2 the speed envelope allowed
     added @6 :Float32;         # retired 2026-10-27; m/s the envelope had put on the car
     fade @7 :Float32;          # 0..1 from the bend ahead at the current speed
+    planFade @8 :Float32;      # 0..1 from the slowdown the plan or a closing lead sets over 10 s; caps gain
 
     enum Inhibit {
       disabled @0;      # the ExperimentalModeSetSpeed toggle is off (and logs from before it)

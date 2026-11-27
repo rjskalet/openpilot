@@ -1,0 +1,35 @@
+name: PR31 vehicle regression tests
+
+on:
+  push:
+    branches:
+      - integration/zoompilot-stable-20261121-dual-vehicle
+
+permissions:
+  contents: read
+
+jobs:
+  mazda-and-suburban:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install focused Python test requirements
+        shell: bash
+        run: |
+          python -m venv /tmp/pr31-venv
+          /tmp/pr31-venv/bin/pip install --disable-pip-version-check --only-binary=:all: pytest numpy pycapnp pycryptodome tqdm cffi
+      - name: Run Mazda and Suburban regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONPATH="$PWD:$PWD/opendbc_repo:$PWD/msgq_repo"
+          /tmp/pr31-venv/bin/python -m pytest -q \
+            opendbc_repo/opendbc/sunnypilot/car/tests/test_speed_dep_config.py \
+            opendbc_repo/opendbc/car/gm/tests/test_suburban_camera_acc.py \
+            opendbc_repo/opendbc/car/tests/test_gm_suburban_camera.py

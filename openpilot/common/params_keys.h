@@ -9,7 +9,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AccessToken", {CLEAR_ON_MANAGER_START | DONT_LOG, STRING}},
     {"AdbEnabled", {PERSISTENT | BACKUP, BOOL}},
     {"AlwaysOnDM", {PERSISTENT | BACKUP, BOOL}},
-    {"ApiCache_Device", {PERSISTENT, STRING}},
+    {"AlwaysOnDMLock", {PERSISTENT, BOOL}},
     {"ApiCache_FirehoseStats", {PERSISTENT, JSON}},
     {"AssistNowToken", {PERSISTENT, STRING}},
     {"AthenadPid", {PERSISTENT, INT}},
@@ -25,7 +25,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"CarParamsPersistent", {PERSISTENT, BYTES}},
     {"CarParamsPrevRoute", {PERSISTENT, BYTES}},
     {"CompletedTrainingVersion", {PERSISTENT, STRING, "0"}},
-    {"ControlsReady", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, BOOL}},
+    {"ControlsReady", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
     {"CurrentBootlog", {PERSISTENT, STRING}},
     {"CurrentRoute", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, STRING}},
     {"DisableDriverCameraIR", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, BOOL}},
@@ -40,7 +40,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"DriverTooDistracted", {CLEAR_ON_MANAGER_START | CLEAR_ON_IGNITION_ON, BOOL}},
     {"DriverLockoutCount", {CLEAR_ON_MANAGER_START | CLEAR_ON_IGNITION_ON, INT, "0"}},
     {"AlphaLongitudinalEnabled", {PERSISTENT | DEVELOPMENT_ONLY | BACKUP, BOOL}},
-    {"FirmwareQueryDone", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, BOOL}},
+    {"FirmwareQueryDone", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
     {"ForcePowerDown", {PERSISTENT, BOOL}},
     {"GitBranch", {PERSISTENT, STRING}},
     {"GitCommit", {PERSISTENT, STRING}},
@@ -91,8 +91,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"LongitudinalManeuverMode", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
     {"LongitudinalPersonality", {PERSISTENT | BACKUP, INT, std::to_string(static_cast<int>(cereal::LongitudinalPersonality::STANDARD))}},
     {"NetworkMetered", {PERSISTENT | BACKUP, BOOL}},
-    {"ObdMultiplexingChanged", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, BOOL}},
-    {"ObdMultiplexingEnabled", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, BOOL}},
+    {"ObdMultiplexingChanged", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
+    {"ObdMultiplexingEnabled", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
     {"Offroad_CarUnrecognized", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, JSON}},
     {"Offroad_ChestnutBranch", {CLEAR_ON_MANAGER_START, JSON}},
     {"Offroad_ChestnutNotDetected", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, JSON}},
@@ -104,7 +104,6 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"Offroad_ConnectivityNeeded", {CLEAR_ON_MANAGER_START, JSON}},
     {"Offroad_ConnectivityNeededPrompt", {CLEAR_ON_MANAGER_START, JSON}},
     {"Offroad_ExcessiveActuation", {PERSISTENT, JSON}},
-    {"Offroad_NoFirmware", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, JSON}},
     {"Offroad_Recalibration", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, JSON}},
     {"Offroad_TemperatureTooHigh", {CLEAR_ON_MANAGER_START, JSON}},
     {"Offroad_UnregisteredHardware", {CLEAR_ON_MANAGER_START, JSON}},
@@ -118,6 +117,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"RecordFront", {PERSISTENT | BACKUP, BOOL}},
     {"RecordFrontLock", {PERSISTENT, BOOL}},  // for the internal fleet
     {"SecOCKey", {PERSISTENT | DONT_LOG | BACKUP, STRING}},
+    {"Notifications", {PERSISTENT, JSON}},
     {"ShowDebugInfo", {PERSISTENT, BOOL}},
     {"RouteCount", {PERSISTENT, INT, "0"}},
     {"SnoozeUpdate", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, BOOL}},
@@ -154,6 +154,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"Version", {PERSISTENT, STRING}},
 
     // --- sunnypilot params --- //
+    {"AccelBoostSP", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"ApiCache_DriveStats", {PERSISTENT, JSON}},
     {"AutoLaneChangeBsmDelay", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"AutoLaneChangeTimer", {PERSISTENT | BACKUP, INT, "0"}},
@@ -264,8 +265,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"LaneTurnDesire", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"LaneTurnValue", {PERSISTENT | BACKUP, FLOAT, "19.0"}},
     {"Blendful", {PERSISTENT | BACKUP, BOOL, "0"}},
-    {"BlendfulReadout", {PERSISTENT | BACKUP, BOOL, "0"}},
-    {"SmallModelSteering", {PERSISTENT | BACKUP, FLOAT, "5.0"}},
+    {"BigModelSmoothing", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"PlanplusControl", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
 
     // mapd
@@ -293,7 +293,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // Speed Limit
     {"SpeedLimitMode", {PERSISTENT | BACKUP, INT, "1"}},
     {"SpeedLimitOffsetType", {PERSISTENT | BACKUP, INT, "0"}},
-    {"SpeedLimitPolicy", {PERSISTENT | BACKUP, INT, "3"}},
+    {"SpeedLimitPolicy", {PERSISTENT | BACKUP, INT, "2"}},
     {"SpeedLimitValueOffset", {PERSISTENT | BACKUP, INT, "0"}},
 
     // Smart Cruise Control
@@ -313,9 +313,12 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"TorqueParamsOverrideLatAccelFactor", {PERSISTENT | BACKUP, FLOAT, "2.5"}},
 
     // --- zoompilot params --- //
+    {"CurveSpeedProfile", {PERSISTENT | BACKUP, INT, "1"}},  // curve planners' lateral ceiling: 0 Gentle, 1 Normal, 2 Sporty (curve_speed_profile.py)
     {"ExperimentalModeSetSpeed", {PERSISTENT | BACKUP, BOOL, "1"}},
+    {"LaneCenterUI", {PERSISTENT | BACKUP, BOOL, "1"}},  // lane center assist's gauge on the 3X
     {"LaneChangeSmoothing", {PERSISTENT | BACKUP, INT, "0"}},
     {"LeadForecast", {PERSISTENT | BACKUP, BOOL, "1"}},
+    {"LeadForecastRadar", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"LiveTorqueParametersSP", {PERSISTENT | DONT_LOG, BYTES}},
     {"LiveTorqueParametersSPSuburban", {PERSISTENT | DONT_LOG, BYTES}},
     {"LiveTorqueParametersSPMazda", {PERSISTENT | DONT_LOG, BYTES}},
@@ -331,11 +334,14 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // Accelerators: what runs the large model. See sunnypilot/jetlink_adapter/.
     {"AcceleratorProgress", {CLEAR_ON_MANAGER_START, JSON}},
     {"Offroad_AcceleratorUnavailable", {CLEAR_ON_MANAGER_START, JSON}},
+    // a comma that has seen a chestnut downloads its big model through the model manager (models/manager.py)
+    {"ChestnutSeen", {PERSISTENT, BOOL}},
+    {"Offroad_ChestnutModelDownloading", {CLEAR_ON_MANAGER_START, JSON}},
+    {"Offroad_ChestnutModelMissing", {CLEAR_ON_MANAGER_START, JSON}},
     // jetlink backend. JetlinkSpec carries whether the engine is built, which must
     // survive a reboot, or every ignition cycle would rebuild a multi-minute engine.
     {"JetlinkLink", {PERSISTENT | BACKUP, INT, "0"}},
     {"JetlinkSpec", {PERSISTENT, JSON}},
-    {"JetlinkModelPointers", {PERSISTENT, JSON}},
     // an iPhone on a direct cable charges from the comma; off by default, some
     // lose the link once the comma powers them
     {"JetlinkChargePhone", {PERSISTENT, BOOL, "0"}},
